@@ -1,3 +1,4 @@
+# Vendored from OpenManus (https://github.com/FoundationAgents/OpenManus) under MIT License.
 from enum import Enum
 from typing import Any, List, Literal, Optional, Union
 

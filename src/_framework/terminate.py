@@ -1,3 +1,4 @@
+# Vendored from OpenManus (https://github.com/FoundationAgents/OpenManus) under MIT License.
 from .tool_base import BaseTool
 
 

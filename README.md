@@ -138,3 +138,7 @@ muti_agent/
 ## License
 
 MIT
+
+## Attribution
+
+The agent framework in `src/_framework/` is vendored from [OpenManus](https://github.com/FoundationAgents/OpenManus) (MIT License) by the OpenManus contributors. See `src/_framework/ATTRIBUTION.md` for details.

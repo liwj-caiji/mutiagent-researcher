@@ -1,3 +1,4 @@
+# Vendored from OpenManus (https://github.com/FoundationAgents/OpenManus) under MIT License.
 import asyncio
 import json
 from typing import Any, List, Optional, Union

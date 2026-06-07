@@ -1,3 +1,4 @@
+# Vendored from OpenManus (https://github.com/FoundationAgents/OpenManus) under MIT License.
 from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
 from typing import Any, List, Optional

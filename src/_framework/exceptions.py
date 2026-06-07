@@ -1,3 +1,4 @@
+# Vendored from OpenManus (https://github.com/FoundationAgents/OpenManus) under MIT License.
 class ToolError(Exception):
     """Raised when a tool encounters an error."""
 

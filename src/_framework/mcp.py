@@ -1,3 +1,4 @@
+# Vendored from OpenManus (https://github.com/FoundationAgents/OpenManus) under MIT License.
 from contextlib import AsyncExitStack
 from typing import Dict, List, Optional
 
