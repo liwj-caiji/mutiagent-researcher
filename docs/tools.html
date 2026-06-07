@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工具实现 — 多 Agent 研究助手</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --card-bg: #ffffff;
+    --text: #1a1a2e;
+    --text-muted: #4a4a6a;
+    --border: #d0d5dd;
+    --accent: #5b4af5;
+    --code-bg: #1a1a2e;
+    --code-text: #e2e4f0;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.75;
+  }
+  .sidebar {
+    position: fixed; left:0; top:0; bottom:0; width: 260px;
+    background: #16143a; color: #cfd0e8; padding: 24px 0; overflow-y: auto; z-index: 100;
+  }
+  .sidebar h2 {
+    font-size: 15px; font-weight: 600; padding: 0 24px 16px;
+    color: #b8baf0; letter-spacing: .04em;
+  }
+  .sidebar a {
+    display: block; padding: 8px 24px; color: #8b8ed8;
+    text-decoration: none; font-size: 14px; transition: all .15s;
+    border-left: 3px solid transparent;
+  }
+  .sidebar a:hover, .sidebar a.active {
+    color: #ffffff; background: rgba(255,255,255,.1); border-left-color: #9089f8;
+  }
+  .sidebar a.sub { padding-left: 40px; font-size: 13px; }
+  .main { margin-left: 260px; max-width: 980px; padding: 40px 52px 80px; }
+  h1 { font-size: 2.1em; margin-bottom: 8px; font-weight: 700; color: #16143a; }
+  h2 {
+    font-size: 1.5em; margin: 44px 0 18px; padding-bottom: 10px;
+    border-bottom: 2px solid var(--border); font-weight: 700; color: #2a2568;
+  }
+  h3 { font-size: 1.2em; margin: 28px 0 12px; font-weight: 600; color: #3d31a8; }
+  .subtitle { font-size: 16px; color: var(--text-muted); margin-bottom: 32px; }
+  .card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; margin: 16px 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .mermaid-wrap {
+    background: #fff; border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; margin: 20px 0;
+    overflow-x: auto; text-align: center;
+  }
+  .mermaid-wrap .caption { font-size: 13px; color: var(--text-muted); margin-top: 12px; font-style: italic; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px;
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  }
+  th { background: #e8eaf0; font-weight: 600; padding: 10px 14px; text-align: left; color: #1a1a2e; }
+  td { padding: 10px 14px; border-top: 1px solid var(--border); color: #1a1a2e; }
+  tr:nth-child(even) td { background: #f8f8fb; }
+  pre {
+    background: var(--code-bg); color: var(--code-text);
+    padding: 18px 22px; border-radius: 10px; overflow-x: auto;
+    font-size: 13px; line-height: 1.7; margin: 14px 0;
+  }
+  code { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; }
+  :not(pre) > code {
+    background: #e8eaf0; color: #c7254e; padding: 2px 6px; border-radius: 4px; font-size: 13px; font-weight: 500;
+  }
+  .badge {
+    display: inline-block; padding: 3px 10px; border-radius: 20px;
+    font-size: 12px; font-weight: 600;
+  }
+  .badge-accent { background: #f0edff; color: #3d31a8; }
+  .badge-success { background: #e0f5ee; color: #0d7a52; }
+  .badge-warn { background: #fff5e0; color: #b05d0c; }
+  .badge-info { background: #e5f0ff; color: #1a5fb8; }
+  .callout {
+    border-left: 4px solid #5b4af5; background: #f0edff;
+    padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 16px 0; font-size: 14px;
+    color: #1a1a2e;
+  }
+  .tool-card {
+    background: #fff; border: 2px solid var(--border); border-radius: 12px;
+    padding: 24px; margin: 20px 0;
+    border-top: 4px solid var(--accent);
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .tool-card h3 { margin-top: 0; display: flex; align-items: center; gap: 10px; }
+  .param-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; margin: 12px 0; }
+  .param-grid div { padding: 6px 0; border-bottom: 1px solid #e8eaf0; }
+  .param-name { font-weight: 600; font-family: monospace; color: #3d31a8; }
+  .param-required { color: #dc2626; font-size: 12px; margin-left: 4px; font-weight: 600; }
+  .param-optional { color: #6b6b88; font-size: 12px; margin-left: 4px; }
+  .svg-box {
+    background: #fff; border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; margin: 20px 0;
+    text-align: center; overflow-x: auto;
+  }
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; padding: 24px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <h2>文档导航</h2>
+  <a href="architecture.html">架构设计</a>
+  <a href="tools.html" class="active">工具文档</a>
+  <a href="changelog.html">变更日志</a>
+  <a href="#mechanism" class="sub">调用机制</a>
+  <a href="#tool1" class="sub">WebSearch</a>
+  <a href="#tool2" class="sub">ArxivSearch</a>
+  <a href="#tool3" class="sub">WikipediaSearch</a>
+  <a href="#tool4" class="sub">WebScraper</a>
+  <a href="#tool5" class="sub">PythonExecute</a>
+  <a href="#tool6" class="sub">CitationFormatter</a>
+  <a href="#tool7" class="sub">ReportSaver</a>
+  <a href="#tool8" class="sub">Terminate</a>
+  <a href="#matrix" class="sub">Agent-工具 矩阵</a>
+  <a href="#extend" class="sub">扩展指南</a>
+</nav>
+
+<div class="main">
+
+<h1>工具实现文档</h1>
+<p class="subtitle">所有 Agent 可调用工具的调用方式、实现细节、参数和返回值</p>
+
+<!-- ── 调用机制 ── -->
+<h2 id="mechanism">调用机制</h2>
+
+<div class="card">
+  <h3>并非 MCP 协议</h3>
+  <p>当前工具是<strong>进程内直接调用</strong>，不走 MCP（Model Context Protocol）协议。</p>
+  <pre><code>Agent 进程
+  ToolCallAgent.act()
+    → ToolCollection.execute(name, args)
+      → tool.execute(**kwargs)         ← 直接 Python 异步方法调用</code></pre>
+  <p>OpenManus 具备 MCP 支持（<code>OpenManus_origin/app/tool/mcp.py</code> — <code>MCPClientTool</code> / <code>MCPClients</code>），若需要可迁移为 MCP 架构。</p>
+</div>
+
+<h3>基类：OpenManus BaseTool</h3>
+<div class="mermaid-wrap">
+<pre class="mermaid">
+classDiagram
+    class BaseTool {
+        +name: str 名称
+        +description: str 描述
+        +parameters: dict | None 参数定义
+        +execute(**kwargs) Any*
+        +to_param() dict
+    }
+
+    class WebSearchTool {
+        +name = "web_search"
+        +execute(query, max_results)
+    }
+    class ArxivSearchTool {
+        +name = "arxiv_search"
+        +execute(query, max_results)
+    }
+    class WikipediaSearchTool {
+        +name = "wikipedia_search"
+        +execute(query, language)
+    }
+    class WebScraperTool {
+        +name = "web_scraper"
+        +execute(url)
+    }
+    class PythonExecuteTool {
+        +name = "python_execute"
+        +execute(code)
+    }
+    class CitationFormatterTool {
+        +name = "citation_formatter"
+        +execute(citations, style)
+    }
+    class ReportSaverTool {
+        +name = "report_saver"
+        +execute(content, filename)
+    }
+    class Terminate {
+        +name = "terminate"
+        +execute(status)
+    }
+
+    BaseTool <|-- WebSearchTool
+    BaseTool <|-- ArxivSearchTool
+    BaseTool <|-- WikipediaSearchTool
+    BaseTool <|-- WebScraperTool
+    BaseTool <|-- PythonExecuteTool
+    BaseTool <|-- CitationFormatterTool
+    BaseTool <|-- ReportSaverTool
+    BaseTool <|-- Terminate
+</pre>
+  <div class="caption">8 个工具全部继承自 OpenManus BaseTool（Pydantic BaseModel）</div>
+</div>
+
+<h3>ToolCollection 管理</h3>
+<div class="card">
+  <p><code>app.tool.ToolCollection</code> 负责管理工具集合：</p>
+  <ul>
+    <li><code>to_params()</code> — 将所有工具转为 OpenAI function calling 格式发给 LLM</li>
+    <li><code>execute(name, tool_input)</code> — 按名称路由到对应工具执行</li>
+  </ul>
+</div>
+
+<h3>在 main.py 中组装</h3>
+<pre><code># SearcherAgent 工具集 — 4 个搜索工具 + Terminate
+ToolCollection(
+    WebSearchTool(),
+    ArxivSearchTool(),
+    WikipediaSearchTool(),
+    WebScraperTool(),
+    Terminate(),
+)
+
+# WriterAgent 工具集 — 引用格式化 + Terminate
+ToolCollection(CitationFormatterTool(), Terminate())
+
+# 其他 Agent — 仅 Terminate（纯 LLM 推理，无需外部工具）
+ToolCollection(Terminate())</code></pre>
+
+<!-- ═══ TOOL 1 ═══ -->
+<h2 id="tool1">1. WebSearchTool — 网络搜索</h2>
+<div class="tool-card">
+  <table>
+    <tr><td style="width:120px;font-weight:600">文件</td><td><code>src/tools/search/tools.py</code></td></tr>
+    <tr><td style="font-weight:600">调用方式</td><td>DuckDuckGo Instant Answer API（HTTP GET）</td></tr>
+    <tr><td style="font-weight:600">需要认证</td><td>否（免费，无限额）</td></tr>
+    <tr><td style="font-weight:600">超时</td><td>15 秒</td></tr>
+  </table>
+
+  <h4>参数</h4>
+  <div class="param-grid">
+    <div><span class="param-name">query</span> <span class="param-required">必填</span></div><div>string — 搜索关键词</div>
+    <div><span class="param-name">max_results</span> <span class="param-optional">可选</span></div><div>integer — 最大结果数，默认 5</div>
+  </div>
+
+  <h4>实现细节</h4>
+  <pre><code>async def execute(self, query, max_results=5):
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            "https://api.duckduckgo.com/",
+            params={"q": query, "format": "json", "no_html": 1},
+        )
+        data = resp.json()
+        # 1. 取 Abstract（百科摘要）+ AbstractURL
+        # 2. 取 RelatedTopics[]（关联主题）前 N 条，每条的 Text + FirstURL
+        # 3. 拼接为 Markdown 文本返回</code></pre>
+
+  <h4>返回示例</h4>
+  <pre><code>**Abstract**
+DuckDuckGo is a search engine...
+Source: https://en.wikipedia.org/wiki/DuckDuckGo
+
+- Related topic text
+  https://example.com/page</code></pre>
+  <p style="font-size:14px;"><strong>错误处理：</strong>网络异常返回 <code>ToolResult(error="Search failed: ...")</code></p>
+</div>
+
+<!-- ═══ TOOL 2 ═══ -->
+<h2 id="tool2">2. ArxivSearchTool — 学术论文搜索</h2>
+<div class="tool-card">
+  <table>
+    <tr><td style="width:120px;font-weight:600">文件</td><td><code>src/tools/search/tools.py</code></td></tr>
+    <tr><td style="font-weight:600">调用方式</td><td><code>arxiv</code> Python 库（arXiv API 封装）</td></tr>
+    <tr><td style="font-weight:600">需要认证</td><td>否</td></tr>
+    <tr><td style="font-weight:600">依赖</td><td><code>pip install arxiv</code></td></tr>
+  </table>
+
+  <h4>参数</h4>
+  <div class="param-grid">
+    <div><span class="param-name">query</span> <span class="param-required">必填</span></div><div>string — 搜索词（支持关键词/作者/标题）</div>
+    <div><span class="param-name">max_results</span> <span class="param-optional">可选</span></div><div>integer — 最大结果数，默认 5</div>
+  </div>
+
+  <h4>实现细节</h4>
+  <pre><code>async def execute(self, query, max_results=5):
+    import arxiv
+    search = arxiv.Search(query=query, max_results=max_results,
+                          sort_by=arxiv.SortCriterion.Relevance)
+    for paper in search.results():
+        # 提取: paper.title / authors / published / entry_id（URL）/ summary
+        # 每条结果用 "---" 分隔</code></pre>
+
+  <h4>返回示例</h4>
+  <pre><code>**Attention Is All You Need**
+Authors: Ashish Vaswani, Noam Shazeer, ...
+Published: 2017-06-12
+URL: http://arxiv.org/abs/1706.03762v5
+Abstract: The dominant sequence transduction models...
+
+---
+**BERT: Pre-training of Deep Bidirectional Transformers**
+...</code></pre>
+  <p style="font-size:14px;"><strong>错误处理：</strong>无结果返回 <code>"No arXiv results for 'query'."</code>；异常返回 <code>ToolResult(error=...)</code></p>
+</div>
+
+<!-- ═══ TOOL 3 ═══ -->
+<h2 id="tool3">3. WikipediaSearchTool — 维基百科搜索</h2>
+<div class="tool-card">
+  <table>
+    <tr><td style="width:120px;font-weight:600">文件</td><td><code>src/tools/search/tools.py</code></td></tr>
+    <tr><td style="font-weight:600">调用方式</td><td><code>wikipedia</code> Python 库</td></tr>
+    <tr><td style="font-weight:600">需要认证</td><td>否</td></tr>
+    <tr><td style="font-weight:600">依赖</td><td><code>pip install wikipedia</code></td></tr>
+  </table>
+
+  <h4>参数</h4>
+  <div class="param-grid">
+    <div><span class="param-name">query</span> <span class="param-required">必填</span></div><div>string — 搜索词或页面标题</div>
+    <div><span class="param-name">language</span> <span class="param-optional">可选</span></div><div>string — 语言代码，默认 <code>"en"</code></div>
+  </div>
+
+  <h4>实现细节</h4>
+  <pre><code>async def execute(self, query, language="en"):
+    import wikipedia
+    wikipedia.set_lang(language)
+    # 1. wikipedia.search(query, results=3) — 搜索匹配页面标题
+    # 2. 取前 2 个结果
+    # 3. wikipedia.page(title) — 获取页面对象（含 URL）
+    # 4. wikipedia.summary(title, sentences=3) — 获取前 3 句摘要
+    # 5. 拼接为 Markdown，页面间用 "---" 分隔</code></pre>
+
+  <h4>返回示例</h4>
+  <pre><code>**Artificial intelligence**
+URL: https://en.wikipedia.org/wiki/Artificial_intelligence
+Summary: Artificial intelligence (AI) is intelligence demonstrated by machines...
+
+---
+**Machine learning**
+URL: https://en.wikipedia.org/wiki/Machine_learning
+Summary: Machine learning (ML) is a field of inquiry devoted to...</code></pre>
+  <p style="font-size:14px;"><strong>错误处理：</strong>无匹配页面返回 <code>"No Wikipedia articles found for 'query'."</code>；单页面获取失败跳过继续。</p>
+</div>
+
+<!-- ═══ TOOL 4 ═══ -->
+<h2 id="tool4">4. WebScraperTool — 网页内容提取</h2>
+<div class="tool-card">
+  <table>
+    <tr><td style="width:120px;font-weight:600">文件</td><td><code>src/tools/search/tools.py</code></td></tr>
+    <tr><td style="font-weight:600">调用方式</td><td>HTTP GET + 正则去 HTML 标签</td></tr>
+    <tr><td style="font-weight:600">需要认证</td><td>否</td></tr>
+    <tr><td style="font-weight:600">超时</td><td>20 秒</td></tr>
+  </table>
+
+  <h4>参数</h4>
+  <div class="param-grid">
+    <div><span class="param-name">url</span> <span class="param-required">必填</span></div><div>string — 目标网页 URL</div>
+  </div>
+
+  <h4>实现细节</h4>
+  <pre><code>async def execute(self, url):
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        resp = await client.get(url,
+            headers={"User-Agent": "Mozilla/5.0 (ResearchBot/1.0)"})
+        resp.raise_for_status()  # 非 2xx 抛异常
+
+        # 三步清洗：
+        # 1. 去除 &lt;script&gt;...&lt;/script&gt; 和 &lt;style&gt;...&lt;/style&gt; 标签及其内容
+        # 2. 去除所有 HTML 标签（&lt;...&gt; → 换行）
+        # 3. 合并连续换行、合并连续空格
+        # 截断到 8000 字符</code></pre>
+
+  <div class="callout" style="border-left-color:#e6990a;background:#fff9ed;">
+    <strong>注意：</strong>这是一个极简的文本提取。不执行 JavaScript，不处理动态渲染页面。对于 JS 渲染的页面会得到空内容。
+  </div>
+  <p style="font-size:14px;"><strong>错误处理：</strong>HTTP 错误或网络异常返回 <code>ToolResult(error="Web scraping failed: ...")</code></p>
+</div>
+
+<!-- ═══ TOOL 5 ═══ -->
+<h2 id="tool5">5. PythonExecuteTool — Python 代码执行</h2>
+<div class="tool-card">
+  <table>
+    <tr><td style="width:120px;font-weight:600">文件</td><td><code>src/tools/analysis/tools.py</code></td></tr>
+    <tr><td style="font-weight:600">调用方式</td><td><code>subprocess.run()</code> 子进程执行</td></tr>
+    <tr><td style="font-weight:600">超时</td><td>60 秒（可配置）</td></tr>
+    <tr><td style="font-weight:600">工作目录</td><td><code>./data/workspace</code></td></tr>
+  </table>
+
+  <h4>参数</h4>
+  <div class="param-grid">
+    <div><span class="param-name">code</span> <span class="param-required">必填</span></div><div>string — 要执行的 Python 源代码</div>
+  </div>
+
+  <h4>实现细节</h4>
+  <pre><code>async def execute(self, code):
+    # 1. 将代码写入临时 .py 文件（data/workspace/ 目录下）
+    # 2. subprocess.run([sys.executable, script_path],
+    #       capture_output=True, text=True, timeout=60, cwd=workspace)
+    # 3. 收集 stdout + stderr + exit_code
+    # 4. 删除临时文件
+    # 5. 返回 ToolResult(output=stdout + stderr)</code></pre>
+
+  <h4>沙箱程度</h4>
+  <div class="card" style="border-left: 4px solid #e6990a;">
+    <p><strong>有限。</strong>代码在<strong>子进程</strong>中运行（与主进程隔离），但无 Docker 隔离、无网络限制、无文件系统限制（仅限工作目录写文件）。适用于数据分析计算，不适用于执行不可信代码。</p>
+  </div>
+  <p style="font-size:14px;"><strong>错误处理：</strong>超时返回 <code>"Execution timed out after 60s"</code>，其他异常返回错误消息。</p>
+</div>
+
+<!-- ═══ TOOL 6 ═══ -->
+<h2 id="tool6">6. CitationFormatterTool — 引用格式化</h2>
+<div class="tool-card">
+  <table>
+    <tr><td style="width:120px;font-weight:600">文件</td><td><code>src/tools/export/tools.py</code></td></tr>
+    <tr><td style="font-weight:600">调用方式</td><td>纯 Python 字符串拼接</td></tr>
+    <tr><td style="font-weight:600">需要认证</td><td>否</td></tr>
+  </table>
+
+  <h4>参数</h4>
+  <div class="param-grid">
+    <div><span class="param-name">citations</span> <span class="param-required">必填</span></div><div>string — JSON 字符串，引用对象数组</div>
+    <div><span class="param-name">style</span> <span class="param-optional">可选</span></div><div>string — 格式风格：<code>numbered</code>（默认）/ <code>apa</code> / <code>mla</code></div>
+  </div>
+
+  <h4>引用对象结构</h4>
+  <pre><code>[
+  {
+    "title": "Paper Title",
+    "authors": "Author A, Author B",
+    "year": "2024",
+    "url": "https://...",
+    "source": "arXiv / Wikipedia / Website"
+  }
+]</code></pre>
+
+  <h4>实现细节</h4>
+  <pre><code>async def execute(self, citations, style="numbered"):
+    citations_list = json.loads(citations)
+    for i, cite in enumerate(citations_list, 1):
+        if style == "numbered":
+            line = f"[{i}] {authors}. **{title}**. {source}. {year}. {url}"
+        elif style == "apa":
+            line = f"{authors} ({year}). *{title}*. {source}. {url}"
+        elif style == "mla":
+            line = f'{authors}. "{title}." *{source}*, {year}. {url}'</code></pre>
+
+  <h4>输出示例（numbered）</h4>
+  <pre><code>[1] Vaswani et al. **Attention Is All You Need**. arXiv. 2017. http://arxiv.org/abs/1706.03762
+[2] Devlin et al. **BERT: Pre-training**. arXiv. 2018. http://arxiv.org/abs/1810.04805</code></pre>
+  <p style="font-size:14px;"><strong>错误处理：</strong>JSON 解析失败返回 <code>"Invalid JSON for citations"</code></p>
+</div>
+
+<!-- ═══ TOOL 7 ═══ -->
+<h2 id="tool7">7. ReportSaverTool — 报告保存</h2>
+<div class="tool-card">
+  <table>
+    <tr><td style="width:120px;font-weight:600">文件</td><td><code>src/tools/export/tools.py</code></td></tr>
+    <tr><td style="font-weight:600">调用方式</td><td>Python <code>pathlib.Path.write_text()</code></td></tr>
+    <tr><td style="font-weight:600">需要认证</td><td>否</td></tr>
+  </table>
+
+  <h4>参数</h4>
+  <div class="param-grid">
+    <div><span class="param-name">content</span> <span class="param-required">必填</span></div><div>string — 报告全文（Markdown）</div>
+    <div><span class="param-name">filename</span> <span class="param-optional">可选</span></div><div>string — 文件名，默认 <code>report-&lt;时间戳&gt;.md</code></div>
+  </div>
+
+  <h4>实现细节</h4>
+  <pre><code>async def execute(self, content, filename=None):
+    filepath = output_dir / (filename or f"report-{timestamp}.md")
+    filepath.write_text(content, encoding="utf-8")</code></pre>
+
+  <p style="font-size:14px;"><strong>输出目录：</strong><code>./reports/</code>（由构造函数 <code>output_dir</code> 参数控制）</p>
+  <p style="font-size:14px;"><strong>错误处理：</strong>写入失败返回 <code>ToolResult(error="Failed to save report: ...")</code></p>
+</div>
+
+<!-- ═══ TOOL 8 ═══ -->
+<h2 id="tool8">8. Terminate — 任务终止（OpenManus 内置）</h2>
+<div class="tool-card">
+  <table>
+    <tr><td style="width:120px;font-weight:600">文件</td><td><code>OpenManus_origin/app/tool/terminate.py</code></td></tr>
+    <tr><td style="font-weight:600">调用方式</td><td>不执行实际操作，仅标记 Agent 状态</td></tr>
+  </table>
+
+  <h4>参数</h4>
+  <div class="param-grid">
+    <div><span class="param-name">status</span> <span class="param-required">必填</span></div><div>string — <code>"success"</code> 或 <code>"failure"</code></div>
+  </div>
+
+  <h4>实现细节</h4>
+  <pre><code>class Terminate(BaseTool):
+    async def execute(self, status: str) -> str:
+        return f"The interaction has been completed with status: {status}"</code></pre>
+
+  <p><code>Terminate</code> 是一个<strong>特殊工具</strong>。它本身不产生有意义的输出，但 <code>ToolCallAgent._handle_special_tool()</code> 检测到 <code>Terminate</code> 时会将 <code>Agent.state</code> 设为 <code>FINISHED</code>，从而退出 ReAct 循环。<strong>每个 Agent 都必须拥有此工具</strong>，否则无法正常结束。</p>
+
+  <div class="mermaid-wrap">
+<pre class="mermaid">
+sequenceDiagram
+    participant Agent as ToolCallAgent
+    participant TT as Terminate.execute()
+    participant Handler as _handle_special_tool()
+
+    Agent->>Agent: think() → tool_calls 包含 "terminate"
+    Agent->>Agent: act() → execute_tool("terminate")
+    Agent->>TT: execute(status="success")
+    TT-->>Agent: "completed with status: success"
+    Agent->>Handler: _handle_special_tool("terminate")
+    Handler->>Agent: state = FINISHED
+    Note over Agent: ReAct 循环退出
+    Agent-->>Agent: 返回最终记忆摘要
+</pre>
+  <div class="caption">Terminate 是 Agent 唯一能正常结束 ReAct 循环的方式</div>
+</div>
+</div>
+
+<!-- ═══ MATRIX ═══ -->
+<h2 id="matrix">Agent-工具 绑定矩阵</h2>
+<div class="mermaid-wrap">
+<pre class="mermaid">
+graph LR
+    subgraph Planner["规划器"]
+        P_T["Terminate ✅"]
+    end
+    subgraph Searcher["搜索器（工具密集型）"]
+        S_WS["WebSearch ✅"]
+        S_AS["ArxivSearch ✅"]
+        S_WIKI["WikipediaSearch ✅"]
+        S_SCRAPE["WebScraper ✅"]
+        S_T["Terminate ✅"]
+    end
+    subgraph Analyst["分析师"]
+        A_T["Terminate ✅"]
+    end
+    subgraph Synthesizer["综合器"]
+        SY_T["Terminate ✅"]
+    end
+    subgraph Writer["撰写器"]
+        W_CF["CitationFormatter ✅"]
+        W_T["Terminate ✅"]
+    end
+    subgraph Critic["审查器"]
+        C_T["Terminate ✅"]
+    end
+
+    style Searcher fill:#daf5e8,stroke:#0d8a5e,stroke-width:2px
+    style Writer fill:#fce4f0,stroke:#db3988
+</pre>
+  <div class="caption">Searcher 是唯一的工具密集型 Agent（4 个搜索工具）。Writer 需要 CitationFormatter。所有 Agent 都必须有 Terminate。</div>
+</div>
+
+<table>
+  <thead>
+    <tr><th>Agent</th><th>WebSearch</th><th>Arxiv</th><th>Wikipedia</th><th>WebScraper</th><th>PythonExec</th><th>CitationFmt</th><th>ReportSaver</th><th>Terminate</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Planner 规划器</strong></td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#0d7a52;font-weight:700">✓</td></tr>
+    <tr style="background:#f8f8fb"><td><strong>Searcher 搜索器</strong></td><td style="color:#0d7a52;font-weight:700">✓</td><td style="color:#0d7a52;font-weight:700">✓</td><td style="color:#0d7a52;font-weight:700">✓</td><td style="color:#0d7a52;font-weight:700">✓</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#0d7a52;font-weight:700">✓</td></tr>
+    <tr><td><strong>Analyst 分析师</strong></td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#0d7a52;font-weight:700">✓</td></tr>
+    <tr style="background:#f8f8fb"><td><strong>Synthesizer 综合器</strong></td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#0d7a52;font-weight:700">✓</td></tr>
+    <tr><td><strong>Writer 撰写器</strong></td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#0d7a52;font-weight:700">✓</td><td style="color:#b0b0b8">—</td><td style="color:#0d7a52;font-weight:700">✓</td></tr>
+    <tr style="background:#f8f8fb"><td><strong>Critic 审查器</strong></td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#0d7a52;font-weight:700">✓</td></tr>
+  </tbody>
+</table>
+
+<!-- ═══ EXTEND ═══ -->
+<h2 id="extend">扩展工具指南</h2>
+<div class="card">
+  <h3>添加一个新工具</h3>
+  <ol>
+    <li>在对应 <code>src/tools/*/tools.py</code> 中创建类，继承 <code>app.tool.base.BaseTool</code></li>
+    <li>定义 <code>name</code>、<code>description</code>、<code>parameters</code>（JSON Schema）</li>
+    <li>实现 <code>async def execute(self, **kwargs) -> Any</code>，返回 <code>ToolResult</code> 或字符串</li>
+    <li>在 <code>src/main.py</code> 的 <code>build_tool_collections()</code> 中注册到对应 Agent 的 <code>ToolCollection</code></li>
+  </ol>
+</div>
+
+<div class="card">
+  <h3>通信方式</h3>
+  <p>当前工具存放在 <code>src/tools/</code> 下，与 Agent 同进程运行。若需 MCP 远程调用，OpenManus 已提供 <code>MCPClientTool</code>（<code>OpenManus_origin/app/tool/mcp.py</code>），只需将工具包装为 MCP Server 进程即可。</p>
+</div>
+
+<h3>工具调用架构全景</h3>
+<div class="svg-box">
+<svg viewBox="0 0 680 380" width="100%" max-width="680" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="sh"><feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.12"/></filter>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#7a7a95"/>
+    </marker>
+  </defs>
+
+  <!-- Agent -->
+  <rect x="180" y="10" width="320" height="50" rx="10" fill="#f0edff" stroke="#5b4af5" stroke-width="2" filter="url(#sh)"/>
+  <text x="340" y="40" text-anchor="middle" font-size="14" font-weight="600" fill="#2a1fa8">ToolCallAgent</text>
+
+  <line x1="340" y1="60" x2="340" y2="85" stroke="#7a7a95" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- ToolCollection -->
+  <rect x="200" y="85" width="280" height="45" rx="10" fill="#fef5d0" stroke="#d98a0c" stroke-width="2" filter="url(#sh)"/>
+  <text x="340" y="113" text-anchor="middle" font-size="14" font-weight="600" fill="#8b5e08">ToolCollection.execute(name, args)</text>
+
+  <line x1="340" y1="130" x2="340" y2="155" stroke="#7a7a95" stroke-width="2"/>
+  <line x1="80" y1="155" x2="600" y2="155" stroke="#7a7a95" stroke-width="2"/>
+
+  <!-- Row 1 -->
+  <line x1="80" y1="155" x2="80" y2="175" stroke="#7a7a95" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="10" y="175" width="140" height="55" rx="8" fill="#e0f5ee" stroke="#0d8a5e" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="80" y="198" text-anchor="middle" font-size="12" font-weight="600" fill="#065a3a">WebSearch</text>
+  <text x="80" y="216" text-anchor="middle" font-size="10" fill="#0d6b48">DuckDuckGo API</text>
+
+  <line x1="210" y1="155" x2="210" y2="175" stroke="#7a7a95" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="140" y="175" width="140" height="55" rx="8" fill="#e0f5ee" stroke="#0d8a5e" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="210" y="198" text-anchor="middle" font-size="12" font-weight="600" fill="#065a3a">ArxivSearch</text>
+  <text x="210" y="216" text-anchor="middle" font-size="10" fill="#0d6b48">arxiv 库</text>
+
+  <line x1="340" y1="155" x2="340" y2="175" stroke="#7a7a95" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="270" y="175" width="140" height="55" rx="8" fill="#e0f5ee" stroke="#0d8a5e" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="340" y="198" text-anchor="middle" font-size="12" font-weight="600" fill="#065a3a">WikipediaSearch</text>
+  <text x="340" y="216" text-anchor="middle" font-size="10" fill="#0d6b48">wikipedia 库</text>
+
+  <line x1="470" y1="155" x2="470" y2="175" stroke="#7a7a95" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="400" y="175" width="140" height="55" rx="8" fill="#e0f5ee" stroke="#0d8a5e" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="470" y="198" text-anchor="middle" font-size="12" font-weight="600" fill="#065a3a">WebScraper</text>
+  <text x="470" y="216" text-anchor="middle" font-size="10" fill="#0d6b48">HTTP GET + 正则</text>
+
+  <line x1="600" y1="155" x2="600" y2="175" stroke="#7a7a95" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="530" y="175" width="140" height="55" rx="8" fill="#e0f5ee" stroke="#0d8a5e" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="600" y="198" text-anchor="middle" font-size="12" font-weight="600" fill="#065a3a">PythonExecute</text>
+  <text x="600" y="216" text-anchor="middle" font-size="10" fill="#0d6b48">subprocess.run()</text>
+
+  <!-- Row 2 -->
+  <line x1="130" y1="230" x2="130" y2="255" stroke="#7a7a95" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="60" y="255" width="140" height="55" rx="8" fill="#fce4f0" stroke="#db3988" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="130" y="278" text-anchor="middle" font-size="12" font-weight="600" fill="#8c1a5e">CitationFormatter</text>
+  <text x="130" y="296" text-anchor="middle" font-size="10" fill="#ad2070">字符串格式化</text>
+
+  <line x1="340" y1="230" x2="340" y2="255" stroke="#7a7a95" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="270" y="255" width="140" height="55" rx="8" fill="#fce4f0" stroke="#db3988" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="340" y="278" text-anchor="middle" font-size="12" font-weight="600" fill="#8c1a5e">ReportSaver</text>
+  <text x="340" y="296" text-anchor="middle" font-size="10" fill="#ad2070">pathlib.write_text()</text>
+
+  <line x1="550" y1="230" x2="550" y2="255" stroke="#7a7a95" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="480" y="255" width="140" height="55" rx="8" fill="#ffe8d0" stroke="#e87a18" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="550" y="278" text-anchor="middle" font-size="12" font-weight="600" fill="#8c4008">Terminate</text>
+  <text x="550" y="296" text-anchor="middle" font-size="10" fill="#b05510">state → FINISHED</text>
+
+  <!-- Legend -->
+  <rect x="40" y="342" width="12" height="12" rx="2" fill="#e0f5ee" stroke="#0d8a5e"/>
+  <text x="58" y="353" font-size="11" fill="#4a4a6a">搜索工具</text>
+  <rect x="180" y="342" width="12" height="12" rx="2" fill="#fce4f0" stroke="#db3988"/>
+  <text x="198" y="353" font-size="11" fill="#4a4a6a">导出工具</text>
+  <rect x="320" y="342" width="12" height="12" rx="2" fill="#ffe8d0" stroke="#e87a18"/>
+  <text x="338" y="353" font-size="11" fill="#4a4a6a">控制工具</text>
+
+  <text x="340" y="370" text-anchor="middle" font-size="11" fill="#7a7a95">所有工具通过 BaseTool.execute(**kwargs) 进程内直接调用</text>
+</svg>
+<div class="caption">图：工具架构全景 — ToolCollection 按名称路由，各工具进程内执行</div>
+</div>
+
+<!-- 页脚 -->
+<div class="card" style="margin-top:40px;">
+  <p style="text-align:center;color:var(--text-muted);font-size:14px;margin:0;">
+    <a href="architecture.html" style="color:var(--accent);font-weight:600;">← 架构设计</a>
+    &nbsp;&nbsp;|&nbsp;&nbsp;
+    <a href="changelog.html" style="color:var(--accent);font-weight:600;">变更日志 →</a>
+  </p>
+</div>
+
+</div><!-- /.main -->
+
+<script>
+mermaid.initialize({
+  startOnLoad: true,
+  theme: 'base',
+  securityLevel: 'loose',
+  themeVariables: {
+    primaryColor: '#5b4af5',
+    primaryTextColor: '#ffffff',
+    primaryBorderColor: '#3d31a8',
+    lineColor: '#4a4a6a',
+    secondaryColor: '#f0edff',
+    secondaryTextColor: '#1a1a2e',
+    tertiaryColor: '#f5f6f8',
+    tertiaryTextColor: '#1a1a2e',
+    fontSize: '14px',
+    fontFamily: '"PingFang SC","Microsoft YaHei",sans-serif',
+  }
+});
+</body>
+</html>

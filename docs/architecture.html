@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>架构设计 — 多 Agent 研究助手</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --card-bg: #ffffff;
+    --text: #1a1a2e;
+    --text-muted: #4a4a6a;
+    --border: #d0d5dd;
+    --accent: #5b4af5;
+    --accent-light: #f0edff;
+    --code-bg: #1a1a2e;
+    --code-text: #e2e4f0;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.75;
+  }
+
+  .sidebar {
+    position: fixed; left:0; top:0; bottom:0; width: 260px;
+    background: #16143a; color: #cfd0e8;
+    padding: 24px 0; overflow-y: auto; z-index: 100;
+  }
+  .sidebar h2 {
+    font-size: 15px; font-weight: 600; padding: 0 24px 16px;
+    color: #b8baf0; letter-spacing: .04em;
+  }
+  .sidebar a {
+    display: block; padding: 8px 24px; color: #8b8ed8;
+    text-decoration: none; font-size: 14px; transition: all .15s;
+    border-left: 3px solid transparent;
+  }
+  .sidebar a:hover, .sidebar a.active {
+    color: #ffffff; background: rgba(255,255,255,.1); border-left-color: #9089f8;
+  }
+  .sidebar a.sub { padding-left: 40px; font-size: 13px; }
+
+  .main { margin-left: 260px; max-width: 980px; padding: 40px 52px 80px; }
+  h1 { font-size: 2.1em; margin-bottom: 8px; font-weight: 700; color: #16143a; }
+  h2 {
+    font-size: 1.5em; margin: 44px 0 18px; padding-bottom: 10px;
+    border-bottom: 2px solid var(--border); font-weight: 700; color: #2a2568;
+  }
+  h3 { font-size: 1.2em; margin: 28px 0 12px; font-weight: 600; color: #3d31a8; }
+  h4 { font-size: 1.05em; margin: 20px 0 8px; font-weight: 600; color: #1a1a2e; }
+
+  p, li { font-size: 15px; color: var(--text); }
+  p { margin: 10px 0; }
+  li { margin: 5px 0; }
+
+  .subtitle { font-size: 16px; color: var(--text-muted); margin-bottom: 32px; }
+
+  .card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; margin: 16px 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+
+  .mermaid-wrap {
+    background: #fff; border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; margin: 20px 0;
+    overflow-x: auto; text-align: center;
+  }
+  .mermaid-wrap .caption { font-size: 13px; color: var(--text-muted); margin-top: 12px; font-style: italic; }
+
+  table {
+    width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px;
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  }
+  th { background: #e8eaf0; font-weight: 600; padding: 10px 14px; text-align: left; color: #1a1a2e; }
+  td { padding: 10px 14px; border-top: 1px solid var(--border); color: #1a1a2e; }
+  tr:nth-child(even) td { background: #f8f8fb; }
+
+  pre {
+    background: var(--code-bg); color: var(--code-text);
+    padding: 18px 22px; border-radius: 10px; overflow-x: auto;
+    font-size: 13px; line-height: 1.7; margin: 14px 0;
+  }
+  code { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; }
+  :not(pre) > code {
+    background: #e8eaf0; color: #c7254e; padding: 2px 6px; border-radius: 4px; font-size: 13px; font-weight: 500;
+  }
+
+  .svg-box {
+    background: #fff; border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; margin: 20px 0;
+    text-align: center; overflow-x: auto;
+  }
+
+  .badge {
+    display: inline-block; padding: 3px 10px; border-radius: 20px;
+    font-size: 12px; font-weight: 600; letter-spacing: .02em;
+  }
+  .badge-accent { background: var(--accent-light); color: #3d31a8; }
+  .badge-success { background: #e0f5ee; color: #0d7a52; }
+  .badge-warning { background: #fff5e0; color: #b05d0c; }
+
+  .flow-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+  .flow-step {
+    background: var(--accent-light); color: #3d31a8;
+    padding: 8px 16px; border-radius: 8px;
+    font-weight: 600; font-size: 14px; white-space: nowrap;
+    border: 1px solid #c8c0f8;
+  }
+  .flow-arrow { color: #6b6b80; font-size: 18px; font-weight: 700; }
+
+  .callout {
+    border-left: 4px solid var(--accent); background: var(--accent-light);
+    padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 16px 0; font-size: 14px;
+    color: #1a1a2e;
+  }
+  .callout-warn {
+    border-left-color: #e6990a; background: #fff9ed;
+  }
+
+  .tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 600; margin-right: 4px;
+  }
+  .tag-added { background: #e0f5ee; color: #0d7a52; }
+  .tag-changed { background: #fff5e0; color: #b05d0c; }
+
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; padding: 24px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <h2>文档导航</h2>
+  <a href="architecture.html" class="active">架构设计</a>
+  <a href="tools.html">工具文档</a>
+  <a href="changelog.html">变更日志</a>
+  <a href="#overview" class="sub">项目概述</a>
+  <a href="#topology" class="sub">系统拓扑</a>
+  <a href="#agents" class="sub">Agent 角色</a>
+  <a href="#pipeline" class="sub">研究流水线</a>
+  <a href="#layers" class="sub">技术栈分层</a>
+  <a href="#inheritance" class="sub">Agent 继承体系</a>
+  <a href="#interaction" class="sub">Think→Act 循环</a>
+  <a href="#llmadapter" class="sub">LLMAdapter 桥接层</a>
+  <a href="#tools-section" class="sub">工具层</a>
+  <a href="#workflow" class="sub">LangGraph 工作流</a>
+  <a href="#memory" class="sub">记忆系统</a>
+  <a href="#config" class="sub">配置系统</a>
+  <a href="#providers" class="sub">LLM 提供商</a>
+  <a href="#modules" class="sub">模块映射</a>
+  <a href="#limitations" class="sub">已知限制</a>
+</nav>
+
+<div class="main">
+
+<h1>架构设计文档</h1>
+<p class="subtitle">多 Agent 研究助手 — LangGraph 编排 + OpenManus Agent 基座</p>
+
+<!-- 1. 项目概述 -->
+<h2 id="overview">1. 项目概述</h2>
+<div class="card">
+  <p>多 Agent 协作研究助手。用户输入研究主题，<strong>6 个专用 Agent</strong> 在 LangGraph 编排下协作完成：</p>
+  <p style="font-size:16px;text-align:center;margin:16px 0;font-weight:600;">
+    主题分解 → 多源搜索 → 深度分析 → 综合归纳 → 报告撰写 → 质量审查
+  </p>
+  <p>最终输出：<strong>结构化 Markdown 研究报告</strong>。</p>
+</div>
+
+<h3>核心设计原则</h3>
+<table>
+  <tr><td style="width:180px;font-weight:600;">关注点分离</td><td>LangGraph 负责编排（何时执行谁），OpenManus 负责 Agent 内部循环（如何思考与行动）</td></tr>
+  <tr><td style="font-weight:600;">模型可配置</td><td>每个 Agent 通过 <code>config/agents.yaml</code> 独立配置 provider / model / temperature</td></tr>
+  <tr><td style="font-weight:600;">质量闭环</td><td>Critic 评分 → 低于阈值自动重试（最多 3 轮）</td></tr>
+  <tr><td style="font-weight:600;">复用上游</td><td>Agent 基座使用 FoundationAgents/OpenManus，不重复造轮子</td></tr>
+</table>
+
+<!-- 2. 系统拓扑 -->
+<h2 id="topology">2. 系统拓扑结构</h2>
+<div class="mermaid-wrap">
+<pre class="mermaid">
+flowchart TB
+    USER["用户输入：研究主题"]
+
+    subgraph LANGGRAPH["LangGraph StateGraph 编排层"]
+        direction TB
+
+        subgraph STATE["共享状态：ResearchState (TypedDict)"]
+            topic["topic 主题"]
+            queries["search_queries 搜索查询"]
+            results["search_results 搜索结果"]
+            analyses["analyses 分析结果"]
+            draft["draft_report 报告草稿"]
+            score["quality_score 质量评分"]
+        end
+
+        P["🧭 Planner 规划器<br/>分解主题 → 查询 + 大纲"]
+        S["🔍 Searcher 搜索器<br/>多源搜索<br/>Web / arXiv / Wiki"]
+        A["📊 Analyst 分析师<br/>交叉验证 & 可信度评估"]
+        SY["🧩 Synthesizer 综合器<br/>整合分析结论"]
+        W["✍️ Writer 撰写器<br/>编写结构化报告"]
+        C["🔎 Critic 审查器<br/>6 维度评分"]
+        F["📝 Formatter 格式化<br/>生成最终报告"]
+
+        P --> S --> A --> SY --> W --> C
+        C -->|"评分 ≥ 阈值"| F
+        C -->|"评分 < 阈值 & 还有剩余轮次"| P
+        F --> END(["📄 ./reports/report-*.md"])
+    end
+
+    USER --> P
+
+    style LANGGRAPH fill:#f0edff,stroke:#5b4af5,stroke-width:2px
+    style STATE fill:#f5f6f8,stroke:#8888a0,stroke-dasharray:5
+    style P fill:#e0e5ff,stroke:#3b5df6
+    style S fill:#daf5e8,stroke:#0d8a5e
+    style A fill:#fef0d0,stroke:#d98a0c
+    style SY fill:#efe8ff,stroke:#7b5af5
+    style W fill:#fce4f0,stroke:#db3988
+    style C fill:#ffe8d0,stroke:#e87a18
+    style F fill:#e0e5ff,stroke:#5b4af5
+</pre>
+  <div class="caption">图 1：系统架构 — Supervisor-Worker 拓扑 + 质量反馈闭环</div>
+</div>
+
+<!-- 3. Agent 角色 -->
+<h2 id="agents">3. Agent 角色与职责</h2>
+<table>
+  <thead>
+    <tr><th>Agent</th><th>继承自</th><th>职责</th><th>工具集</th><th>最大步数</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>PlannerAgent 规划器</strong></td>
+      <td>ToolCallAgent</td>
+      <td>分解主题 → 生成搜索查询 → 制定大纲</td>
+      <td><span class="badge badge-accent">Terminate</span></td>
+      <td>5</td>
+    </tr>
+    <tr>
+      <td><strong>SearcherAgent 搜索器</strong></td>
+      <td>ToolCallAgent</td>
+      <td>多源搜索（Web/arXiv/Wikipedia）→ 内容提取</td>
+      <td><span class="badge badge-success">WebSearch</span> <span class="badge badge-success">ArxivSearch</span> <span class="badge badge-success">WikipediaSearch</span> <span class="badge badge-success">WebScraper</span> <span class="badge badge-accent">Terminate</span></td>
+      <td>20</td>
+    </tr>
+    <tr>
+      <td><strong>AnalystAgent 分析师</strong></td>
+      <td>ToolCallAgent</td>
+      <td>交叉验证 → 可信度评估 → 矛盾识别</td>
+      <td><span class="badge badge-accent">Terminate</span></td>
+      <td>10</td>
+    </tr>
+    <tr>
+      <td><strong>SynthesizerAgent 综合器</strong></td>
+      <td>ToolCallAgent</td>
+      <td>整合分析结果 → 构建逻辑框架 → 统一结论</td>
+      <td><span class="badge badge-accent">Terminate</span></td>
+      <td>10</td>
+    </tr>
+    <tr>
+      <td><strong>WriterAgent 撰写器</strong></td>
+      <td>ToolCallAgent</td>
+      <td>撰写结构化报告 → 引用管理</td>
+      <td><span class="badge badge-warning">CitationFormatter</span> <span class="badge badge-accent">Terminate</span></td>
+      <td>15</td>
+    </tr>
+    <tr>
+      <td><strong>CriticAgent 审查器</strong></td>
+      <td>ToolCallAgent</td>
+      <td>6 维度评分 → 缺口识别 → accept/revise</td>
+      <td><span class="badge badge-accent">Terminate</span></td>
+      <td>5</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- 4. 研究流水线 -->
+<h2 id="pipeline">4. 研究流水线（多轮迭代）</h2>
+<div class="mermaid-wrap">
+<pre class="mermaid">
+flowchart LR
+    subgraph R1["第 1 轮（广度搜索）"]
+        direction LR
+        P1["Planner 规划"] --> S1["Searcher 搜索"] --> A1["Analyst 分析"]
+        A1 --> Y1["Synthesizer 综合"] --> W1["Writer 撰写"] --> C1["Critic 评分"]
+    end
+
+    subgraph R2["第 2 轮（深度补充）"]
+        direction LR
+        P2["Planner 规划"] --> S2["Searcher 搜索"] --> A2["Analyst 分析"]
+        A2 --> Y2["Synthesizer 综合"] --> W2["Writer 撰写"] --> C2["Critic 评分"]
+    end
+
+    R1 -->|"评分 < 75"| R2
+    R1 -->|"评分 ≥ 75"| FINAL["✅ 最终报告"]
+    R2 -->|"评分 ≥ 75"| FINAL
+    R2 -->|"评分 < 75"| R3["第 3 轮 ……"]
+    R3 --> FINAL2["⚠️ 尽力交付报告"]
+
+    style R1 fill:#f0edff,stroke:#5b4af5,stroke-width:2px
+    style R2 fill:#fef5d0,stroke:#d98a0c,stroke-width:2px
+    style FINAL fill:#daf5e8,stroke:#0d8a5e,stroke-width:2px
+</pre>
+  <div class="caption">图 2：多轮研究流水线。参数来自 config/research.yaml：max_rounds=3, quality_threshold=75</div>
+</div>
+
+<!-- 5. 技术栈分层 -->
+<h2 id="layers">5. 技术栈分层</h2>
+<div class="svg-box">
+<svg viewBox="0 0 700 420" width="100%" max-width="700" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="shadow" x="-2%" y="-2%" width="104%" height="108%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+  <!-- 第 1 层：入口 -->
+  <rect x="20" y="10" width="660" height="56" rx="10" fill="#fef5d0" stroke="#d98a0c" stroke-width="2" filter="url(#shadow)"/>
+  <text x="40" y="30" font-size="12" fill="#8b5e08" font-weight="600">入口层 ENTRY</text>
+  <text x="40" y="50" font-size="14" fill="#5c3d08">src/main.py — CLI 命令行入口（typer + rich）</text>
+
+  <!-- 第 2 层：编排 -->
+  <rect x="20" y="78" width="660" height="68" rx="10" fill="#f0edff" stroke="#5b4af5" stroke-width="2" filter="url(#shadow)"/>
+  <text x="40" y="98" font-size="12" fill="#2a1fa8" font-weight="600">编排层 ORCHESTRATION</text>
+  <text x="40" y="118" font-size="14" fill="#3d31a8">src/graph/ — LangGraph StateGraph 工作流</text>
+  <text x="40" y="136" font-size="13" fill="#5548d0">workflow.py · nodes.py · state.py（ResearchState TypedDict 共享状态）</text>
+
+  <!-- 第 3 层：Agent -->
+  <rect x="20" y="158" width="660" height="68" rx="10" fill="#e0f5ee" stroke="#0d8a5e" stroke-width="2" filter="url(#shadow)"/>
+  <text x="40" y="178" font-size="12" fill="#065a3a" font-weight="600">Agent 层 AGENT</text>
+  <text x="40" y="198" font-size="14" fill="#0d6b48">src/agents/ — 6 个专用研究 Agent</text>
+  <text x="40" y="216" font-size="13" fill="#0d8a5e">specialized.py + LLMAdapter（OpenManus → LangChain 桥接层）</text>
+
+  <!-- 第 4a 层：LLM 配置 -->
+  <rect x="20" y="238" width="320" height="56" rx="10" fill="#fce4f0" stroke="#db3988" stroke-width="2" filter="url(#shadow)"/>
+  <text x="40" y="258" font-size="12" fill="#8c1a5e" font-weight="600">LLM 配置</text>
+  <text x="40" y="278" font-size="14" fill="#ad2070">src/llm/config.py — AgentLLMConfig + create_llm()</text>
+
+  <!-- 第 4b 层：工具 -->
+  <rect x="360" y="238" width="320" height="56" rx="10" fill="#ffe8d0" stroke="#e87a18" stroke-width="2" filter="url(#shadow)"/>
+  <text x="380" y="258" font-size="12" fill="#8c4008" font-weight="600">工具层 TOOLS</text>
+  <text x="380" y="278" font-size="14" fill="#b05510">src/tools/ — WebSearch · Arxiv · Wiki · Scraper</text>
+
+  <!-- 第 5 层：OpenManus 基座 -->
+  <rect x="20" y="306" width="660" height="56" rx="10" fill="#e8eaf0" stroke="#6b6b88" stroke-width="2" filter="url(#shadow)"/>
+  <text x="40" y="326" font-size="12" fill="#3d3d58" font-weight="600">Agent 基座（OpenManus_origin/）</text>
+  <text x="40" y="346" font-size="14" fill="#2a2a3e">BaseAgent → ReActAgent → ToolCallAgent · BaseTool · ToolCollection · Memory</text>
+
+  <!-- 第 6 层：记忆 -->
+  <rect x="20" y="374" width="660" height="40" rx="10" fill="#f5f6f8" stroke="#b8b8c8" stroke-width="2" filter="url(#shadow)"/>
+  <text x="40" y="398" font-size="13" fill="#4a4a62">src/memory/ — 短期记忆（OpenManus Memory）+ 长期记忆（ChromaDB）</text>
+</svg>
+<div class="caption">图 3：技术栈分层 — 从 CLI 入口到底层 Agent 基座和持久化</div>
+</div>
+
+<!-- 6. Agent 继承体系 -->
+<h2 id="inheritance">6. Agent 继承体系</h2>
+<div class="mermaid-wrap">
+<pre class="mermaid">
+classDiagram
+    direction TB
+
+    class BaseAgent {
+        +name: str 名称
+        +description: str 描述
+        +system_prompt: str 系统提示词
+        +llm: LLM
+        +memory: Memory 记忆
+        +state: AgentState 状态
+        +max_steps: int 最大步数
+        +current_step: int 当前步数
+        +run(request) str
+        +step() str*
+        +update_memory(role, content)
+        +is_stuck() bool
+    }
+
+    class ReActAgent {
+        +think() bool 思考
+        +act() str 行动
+        +step() str
+    }
+
+    class ToolCallAgent {
+        +available_tools: ToolCollection
+        +tool_choices: ToolChoice
+        +think() bool
+        +act() str
+        +execute_tool(cmd) str
+        +_handle_special_tool()
+        +cleanup()
+    }
+
+    class PlannerAgent {
+        +name = "planner"
+        +max_steps = 5
+        +parse_plan() dict
+    }
+
+    class SearcherAgent {
+        +name = "searcher"
+        +max_steps = 20
+        +tools: WebSearch, Arxiv, Wikipedia, WebScraper
+    }
+
+    class AnalystAgent {
+        +name = "analyst"
+        +max_steps = 10
+    }
+
+    class SynthesizerAgent {
+        +name = "synthesizer"
+        +max_steps = 10
+    }
+
+    class WriterAgent {
+        +name = "writer"
+        +max_steps = 15
+        +tools: CitationFormatter
+    }
+
+    class CriticAgent {
+        +name = "critic"
+        +max_steps = 5
+        +parse_review() dict
+    }
+
+    BaseAgent <|-- ReActAgent
+    ReActAgent <|-- ToolCallAgent
+    ToolCallAgent <|-- PlannerAgent
+    ToolCallAgent <|-- SearcherAgent
+    ToolCallAgent <|-- AnalystAgent
+    ToolCallAgent <|-- SynthesizerAgent
+    ToolCallAgent <|-- WriterAgent
+    ToolCallAgent <|-- CriticAgent
+
+    note for BaseAgent "OpenManus_origin/\napp/agent/base.py\nPydantic BaseModel"
+    note for ReActAgent "Think → Act → Observe\n循环的核心实现"
+    note for ToolCallAgent "工具绑定 + 工具调用\nthink() 调用 llm.ask_tool()"
+</pre>
+  <div class="caption">图 4：Agent 继承层级 — 6 个 Agent 全部继承自 OpenManus ToolCallAgent</div>
+</div>
+
+<!-- 7. Think → Act 交互流程 -->
+<h2 id="interaction">7. Think → Act 交互流程</h2>
+<div class="mermaid-wrap">
+<pre class="mermaid">
+sequenceDiagram
+    actor User as 用户
+    participant Node as LangGraph 节点
+    participant Agent as ToolCallAgent
+    participant LLM as LLMAdapter
+    participant Provider as LLM 提供商<br/>Anthropic/OpenAI/DeepSeek
+    participant Tool as ToolCollection
+    participant Mem as Memory
+
+    Node->>Agent: run(request)
+    activate Agent
+
+    loop ReAct 循环（think → act → observe）
+        Agent->>Agent: think()
+        Agent->>LLM: ask_tool(messages, system_msgs, tools, tool_choice)
+        Note over Agent,LLM: OpenManus 消息格式 → LangChain 消息格式
+        LLM->>Provider: ChatModel.bind_tools(tools).ainvoke()
+        Provider-->>LLM: AIMessage（content + tool_calls）
+        Note over LLM: LangChain AIMessage → OpenManus ToolCallResult
+        LLM-->>Agent: ToolCallResult（content + tool_calls[]）
+
+        alt 有工具调用
+            Agent->>Agent: act()
+            loop 对每个 tool_call
+                Agent->>Tool: execute(name, args)
+                Tool->>Tool: tool.execute(**kwargs)
+                Tool-->>Agent: 结果（字符串或 ToolResult）
+                Agent->>Mem: add_message(tool_msg)
+            end
+            Note over Agent: observe → 下一轮 think()
+        else 无工具调用（Terminate）
+            Agent->>Agent: _handle_special_tool()
+            Note over Agent: state = FINISHED
+        end
+    end
+
+    deactivate Agent
+    Agent-->>Node: 最终响应
+</pre>
+  <div class="caption">图 5：Think→Act 循环 — OpenManus ReAct 循环，LLMAdapter 桥接多 LLM 提供商</div>
+</div>
+
+<!-- 8. LLMAdapter -->
+<h2 id="llmadapter">8. LLMAdapter — 多 Provider 桥接层</h2>
+
+<h3>设计动机</h3>
+<div class="card">
+  <p>OpenManus 的 <code>ToolCallAgent.think()</code> 调用 <code>self.llm.ask_tool()</code>，该接口返回 OpenAI 格式的 <code>ChatCompletionMessage</code>。但 OpenManus 自带的 <code>LLM</code> 类仅支持 OpenAI 兼容 API（通过 <code>AsyncOpenAI</code> 客户端）。</p>
+  <p><strong>LLMAdapter</strong> 包装 LangChain 的 <code>BaseChatModel</code>，对外暴露相同的 <code>ask_tool()</code> 签名，内部使用 LangChain 原生支持 Anthropic / OpenAI / DeepSeek / Ollama。</p>
+</div>
+
+<div class="mermaid-wrap">
+<pre class="mermaid">
+flowchart LR
+    subgraph OM["OpenManus 领域"]
+        Agent["ToolCallAgent"]
+        Msg["OpenManus Message<br/>（role + content + tool_calls）"]
+        TCR["ToolCallResult<br/>（模拟 ChatCompletionMessage）"]
+    end
+
+    subgraph ADAPTER["LLMAdapter 桥接层"]
+        C1["_convert_tools()<br/>OpenManus 格式 → LangChain 格式"]
+        C2["_convert_tool_choice()<br/>ToolChoice 枚举 → 字符串"]
+        C3["消息转换<br/>OM_Message → LC_Message"]
+        C4["响应转换<br/>LC AIMessage → ToolCallResult"]
+    end
+
+    subgraph LC["LangChain 领域"]
+        LCM["LangChain 消息<br/>Human/AI/System/ToolMessage"]
+        Model["ChatModel<br/>Anthropic / OpenAI / DeepSeek / Ollama"]
+        AIM["AIMessage<br/>（content + tool_calls）"]
+    end
+
+    Agent -->|"ask_tool(messages, tools)"| Msg
+    Msg --> C3
+    C3 --> LCM
+    LCM -->|"bind_tools(tools).ainvoke()"| Model
+    Model --> AIM
+    AIM --> C4
+    C4 --> TCR
+    TCR --> Agent
+
+    style ADAPTER fill:#fef5d0,stroke:#d98a0c,stroke-width:2px
+    style OM fill:#f0edff,stroke:#5b4af5,stroke-width:1px
+    style LC fill:#e0f5ee,stroke:#0d8a5e,stroke-width:1px
+</pre>
+  <div class="caption">图 6：LLMAdapter 数据流 — 桥接 OpenManus 消息格式到 LangChain ChatModel</div>
+</div>
+
+<h3>关键格式转换</h3>
+<table>
+  <thead><tr><th>转换项</th><th>OpenManus 格式</th><th>LangChain 格式</th></tr></thead>
+  <tbody>
+    <tr><td><strong>函数参数</strong></td><td><code>Function.arguments</code>（JSON 字符串）</td><td><code>args</code>（字典）</td></tr>
+    <tr><td><strong>工具选择</strong></td><td><code>ToolChoice.AUTO / REQUIRED / NONE</code></td><td><code>"auto" / "any" / "none"</code></td></tr>
+    <tr><td><strong>消息类型</strong></td><td><code>app.schema.Message</code></td><td><code>HumanMessage / AIMessage / SystemMessage / ToolMessage</code></td></tr>
+    <tr><td><strong>工具定义</strong></td><td><code>List[dict]</code>（OpenAI function calling 格式）</td><td><code>List[dict]</code>（LangChain 工具格式）</td></tr>
+    <tr><td><strong>响应类型</strong></td><td><code>ToolCallResult</code>（模拟 ChatCompletionMessage）</td><td><code>AIMessage</code></td></tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <strong>为何使用 agent.__dict__["llm"] = adapter？</strong> OpenManus 的 <code>BaseAgent</code> 通过 Pydantic <code>model_validator</code> 检查 <code>isinstance(self.llm, LLM)</code>——如果不是 OpenManus 的 LLM 实例，它会创建一个新的并<strong>覆盖</strong>我们的 adapter。通过 <code>__dict__</code> 直接赋值可以绕过 Pydantic 验证。
+</div>
+
+<!-- 9. 工具层 — 双模式架构 -->
+<h2 id="tools-section">9. 工具层 — 双模式架构</h2>
+
+<h3>双模式支持</h3>
+<p>工具层支持<strong>进程内调用</strong>和<strong>MCP Server 远程调用</strong>两种模式，由 <code>config/research.yaml</code> 中的 <code>mcp.enabled</code> 切换。</p>
+
+<div class="mermaid-wrap">
+<pre class="mermaid">
+flowchart LR
+    subgraph agent["Agent 进程"]
+        A[ToolCallAgent]
+        TC[ToolCollection]
+    end
+
+    subgraph inproc["模式 1: 进程内调用（默认）"]
+        BT[BaseTool]
+        Ext1[外部 API]
+    end
+
+    subgraph mcp["模式 2: MCP Server 远程调用"]
+        MC[MCPClients]
+        MCT[MCPClientTool]
+        MS[MCP Server 子进程<br/>FastMCP]
+        BT2[BaseTool]
+        Ext2[外部 API]
+    end
+
+    A --> TC
+    TC -- "mcp.enabled: false" --> BT --> Ext1
+    TC -- "mcp.enabled: true" --> MC --> MCT
+    MCT -- "stdio JSON-RPC" --> MS --> BT2 --> Ext2
+
+    style agent fill:#f0edff,stroke:#5b4af5,color:#1a1a2e
+    style inproc fill:#e6f7ee,stroke:#0d7a52,color:#1a1a2e
+    style mcp fill:#fff3e0,stroke:#e67e22,color:#1a1a2e
+    style A fill:#ffffff,stroke:#5b4af5,color:#1a1a2e
+    style TC fill:#ffffff,stroke:#5b4af5,color:#1a1a2e
+    style BT fill:#ffffff,stroke:#0d7a52,color:#1a1a2e
+    style Ext1 fill:#e6f7ee,stroke:#0d7a52,color:#1a1a2e
+    style MC fill:#ffffff,stroke:#e67e22,color:#1a1a2e
+    style MCT fill:#ffffff,stroke:#e67e22,color:#1a1a2e
+    style MS fill:#fff3e0,stroke:#e67e22,color:#1a1a2e
+    style BT2 fill:#ffffff,stroke:#e67e22,color:#1a1a2e
+    style Ext2 fill:#fff3e0,stroke:#e67e22,color:#1a1a2e
+</pre>
+  <div class="caption">图 7：工具双模式架构 — 进程内直接调用 vs MCP Server 远程调用</div>
+</div>
+
+<h3>MCP Server 拓扑</h3>
+<div class="mermaid-wrap">
+<pre class="mermaid">
+flowchart TB
+    subgraph main["主进程"]
+        Mgr[MCPManager<br/>生命周期管理]
+        A1[SearcherAgent]
+        A2[WriterAgent]
+    end
+
+    subgraph search["Search MCP Server (stdio)"]
+        WS[web_search]
+        AS[arxiv_search]
+        WI[wikipedia_search]
+        SC[web_scraper]
+    end
+
+    subgraph analysis["Analysis MCP Server (stdio)"]
+        PE[python_execute]
+    end
+
+    subgraph export["Export MCP Server (stdio)"]
+        CF[citation_formatter]
+        RS[report_saver]
+    end
+
+    Mgr -- "启动/停止" --> search
+    Mgr -- "启动/停止" --> analysis
+    Mgr -- "启动/停止" --> export
+    A1 -- "search" --> search
+    A2 -- "export" --> export
+
+    style main fill:#f0edff,stroke:#5b4af5,color:#1a1a2e
+    style search fill:#e6f7ee,stroke:#0d7a52,color:#1a1a2e
+    style analysis fill:#e6f7ee,stroke:#0d7a52,color:#1a1a2e
+    style export fill:#e6f7ee,stroke:#0d7a52,color:#1a1a2e
+    style Mgr fill:#5b4af5,stroke:#3d31a8,color:#ffffff
+    style A1 fill:#ffffff,stroke:#5b4af5,color:#1a1a2e
+    style A2 fill:#ffffff,stroke:#5b4af5,color:#1a1a2e
+    style WS fill:#ffffff,stroke:#0d7a52,color:#1a1a2e
+    style AS fill:#ffffff,stroke:#0d7a52,color:#1a1a2e
+    style WI fill:#ffffff,stroke:#0d7a52,color:#1a1a2e
+    style SC fill:#ffffff,stroke:#0d7a52,color:#1a1a2e
+    style PE fill:#ffffff,stroke:#0d7a52,color:#1a1a2e
+    style CF fill:#ffffff,stroke:#0d7a52,color:#1a1a2e
+    style RS fill:#ffffff,stroke:#0d7a52,color:#1a1a2e
+</pre>
+  <div class="caption">图 8：MCP Server 拓扑 — 三种独立 MCP Server，通过 MCPManager 统一管理</div>
+</div>
+
+<h3>MCP 调用序列</h3>
+<div class="mermaid-wrap">
+<pre class="mermaid">
+sequenceDiagram
+    participant Agent as ToolCallAgent
+    participant MC as MCPClients
+    participant MCT as MCPClientTool
+    participant MS as MCP Server (stdio)
+    participant BT as BaseTool
+    participant Ext as 外部 API
+
+    Agent->>MC: execute("mcp_search_web_search", {"query": "AI"})
+    MC->>MC: 按名称查找工具
+    MC->>MCT: call_tool("web_search", args)
+    Note over MCT,MS: stdio JSON-RPC 通信
+    MCT->>MS: JSON-RPC tools/call
+    MS->>BT: execute(query="AI", max_results=5)
+    BT->>Ext: GET duckduckgo.com/?q=AI
+    Ext-->>BT: JSON 响应
+    BT-->>MS: ToolResult(output=...)
+    MS-->>MCT: JSON-RPC 响应
+    MCT-->>MC: ToolResult
+    MC-->>Agent: 结果字符串
+</pre>
+  <div class="caption">图 9：MCP 模式下的工具调用序列 — 通过 stdio JSON-RPC 远程调用 MCP Server</div>
+</div>
+
+<h3>Agent 与 MCP Server 绑定矩阵</h3>
+<table>
+  <thead>
+    <tr><th>Agent</th><th>Search MCP</th><th>Analysis MCP</th><th>Export MCP</th><th>本地 Terminate</th></tr>
+  </thead>
+  <tbody>
+    <tr style="background:#fff"><td><strong>Planner 规划器</strong></td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#0d7a52;font-weight:700">✓</td></tr>
+    <tr><td><strong>Searcher 搜索器</strong></td><td style="color:#0d7a52;font-weight:700">✓</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#0d7a52;font-weight:700">✓</td></tr>
+    <tr style="background:#fff"><td><strong>Analyst 分析师</strong></td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#0d7a52;font-weight:700">✓</td></tr>
+    <tr><td><strong>Synthesizer 综合器</strong></td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#0d7a52;font-weight:700">✓</td></tr>
+    <tr style="background:#fff"><td><strong>Writer 撰写器</strong></td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#0d7a52;font-weight:700">✓</td><td style="color:#0d7a52;font-weight:700">✓</td></tr>
+    <tr><td><strong>Critic 审查器</strong></td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#b0b0b8">—</td><td style="color:#0d7a52;font-weight:700">✓</td></tr>
+  </tbody>
+</table>
+<p style="font-size:13px;color:var(--text-muted);margin-top:4px;">Terminate 始终在进程内运行（控制信号工具）。MCP Server 管理外部数据工具（搜索、分析、导出）。<code>MCPClients</code> 继承 <code>ToolCollection</code>，对 Agent 层完全透明。</p>
+
+<!-- 10. LangGraph 工作流 -->
+<h2 id="workflow">10. LangGraph 工作流</h2>
+
+<h3>ResearchState 共享状态</h3>
+<pre><code>class ResearchState(TypedDict, total=False):
+    topic: str                         # 研究主题
+    language: str                      # 报告语言 zh / en
+    outline: list[dict]                # 大纲
+    search_queries: list[str]          # 搜索查询列表
+    search_results: Annotated[list[dict], operator.add]  # 并行追加搜索结果
+    analyses: Annotated[list[dict], operator.add]        # 并行追加分析结果
+    synthesized_findings: str          # 综合结论
+    draft_report: str                  # 报告草稿
+    final_report: str                  # 最终报告
+    citations: list[dict]              # 引用列表
+    quality_score: float               # 质量评分
+    critique: dict                     # 审查意见
+    gaps: list[str]                    # 内容缺口
+    current_phase: str                 # 当前阶段
+    research_round: int                # 当前轮次
+    max_rounds: int                    # 最大轮次
+    quality_threshold: float           # 质量阈值</code></pre>
+
+<h3>StateGraph 结构</h3>
+<div class="mermaid-wrap">
+<pre class="mermaid">
+stateDiagram-v2
+    [*] --> planner
+    planner --> searcher
+    searcher --> analyst
+    analyst --> synthesizer
+    synthesizer --> writer
+    writer --> critic
+
+    critic --> formatter: 评分 ≥ 阈值 或 已达最大轮次
+    critic --> planner: 评分 < 阈值 且 还有剩余轮次
+
+    formatter --> [*]
+
+    note right of critic: _supervisor_router(state)<br/>条件路由判断
+</pre>
+  <div class="caption">图 8：LangGraph StateGraph — 7 个节点 + Critic 处的条件边</div>
+</div>
+
+<h3>节点调用模式</h3>
+<pre><code>async def xxx_node(state: ResearchState, agent: XxxAgent) -> dict:
+    _reset_agent(agent)           # state → IDLE，清空 memory
+    await agent.run(request)      # OpenManus think→act 循环直到 FINISHED
+    # 从 agent.messages 提取 assistant 最后一条回复作为结果
+    return {"field": result}</code></pre>
+
+<div class="mermaid-wrap">
+<pre class="mermaid">
+flowchart LR
+    subgraph "每个节点的执行流程"
+        RESET["_reset_agent()<br/>状态→IDLE<br/>步数归零<br/>清空记忆"]
+        RUN["agent.run(request)<br/>ReAct 循环"]
+        EXTRACT["解析响应<br/>从 agent.messages"]
+        UPDATE["返回 dict<br/>→ 更新 ResearchState"]
+
+        RESET --> RUN --> EXTRACT --> UPDATE
+    end
+</pre>
+  <div class="caption">图 9：节点执行模式 — 每个 LangGraph 节点遵循相同的 重置→运行→提取→更新 周期</div>
+</div>
+
+<!-- 11. 记忆系统 -->
+<h2 id="memory">11. 记忆系统</h2>
+<table>
+  <thead><tr><th>类型</th><th>实现方式</th><th>作用范围</th><th>持久化</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>短期记忆</strong></td>
+      <td>OpenManus <code>app.schema.Memory</code></td>
+      <td>每个 Agent 独立，每次节点运行前清空</td>
+      <td>否（仅内存）</td>
+    </tr>
+    <tr>
+      <td><strong>长期记忆</strong></td>
+      <td><code>src/memory/long_term.py</code> — ChromaDB</td>
+      <td>跨 Agent 研究知识共享</td>
+      <td>是（向量嵌入持久化）</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- 12. 配置系统 -->
+<h2 id="config">12. 配置系统</h2>
+
+<h3>Agent 配置 → LLMAdapter 组装流程</h3>
+<div class="svg-box">
+<svg viewBox="0 0 720 300" width="100%" max-width="720" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#7a7a95"/>
+    </marker>
+  </defs>
+
+  <rect x="10" y="20" width="180" height="70" rx="10" fill="#fef5d0" stroke="#d98a0c" stroke-width="2"/>
+  <text x="100" y="46" text-anchor="middle" font-size="13" font-weight="600" fill="#8b5e08">config/agents.yaml</text>
+  <text x="100" y="66" text-anchor="middle" font-size="11" fill="#5c3d08">planner / searcher / ...</text>
+
+  <line x1="190" y1="55" x2="240" y2="55" stroke="#7a7a95" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="240" y="20" width="200" height="70" rx="10" fill="#f0edff" stroke="#5b4af5" stroke-width="2"/>
+  <text x="340" y="46" text-anchor="middle" font-size="13" font-weight="600" fill="#2a1fa8">AgentLLMConfig</text>
+  <text x="340" y="66" text-anchor="middle" font-size="11" fill="#3d31a8">provider, model, temperature, ...</text>
+
+  <line x1="440" y1="55" x2="490" y2="55" stroke="#7a7a95" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="490" y="20" width="210" height="70" rx="10" fill="#e0f5ee" stroke="#0d8a5e" stroke-width="2"/>
+  <text x="595" y="46" text-anchor="middle" font-size="13" font-weight="600" fill="#065a3a">create_llm(config)</text>
+  <text x="595" y="66" text-anchor="middle" font-size="11" fill="#0d6b48">ChatAnthropic / ChatOpenAI / ChatOllama</text>
+
+  <!-- 向下分支 -->
+  <line x1="595" y1="90" x2="595" y2="110" stroke="#7a7a95" stroke-width="2"/>
+  <line x1="140" y1="110" x2="595" y2="110" stroke="#7a7a95" stroke-width="2"/>
+
+  <line x1="140" y1="110" x2="140" y2="130" stroke="#7a7a95" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="30" y="130" width="220" height="70" rx="10" fill="#fce4f0" stroke="#db3988" stroke-width="2"/>
+  <text x="140" y="156" text-anchor="middle" font-size="13" font-weight="600" fill="#8c1a5e">LLMAdapter(llm_config)</text>
+  <text x="140" y="176" text-anchor="middle" font-size="11" fill="#ad2070">包装 LangChain ChatModel</text>
+
+  <line x1="420" y1="110" x2="420" y2="130" stroke="#7a7a95" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="310" y="130" width="220" height="70" rx="10" fill="#ffe8d0" stroke="#e87a18" stroke-width="2"/>
+  <text x="420" y="156" text-anchor="middle" font-size="13" font-weight="600" fill="#8c4008">ToolCollection(...)</text>
+  <text x="420" y="176" text-anchor="middle" font-size="11" fill="#b05510">按 Agent 角色装配工具</text>
+
+  <line x1="140" y1="200" x2="140" y2="220" stroke="#7a7a95" stroke-width="2"/>
+  <line x1="420" y1="200" x2="420" y2="220" stroke="#7a7a95" stroke-width="2"/>
+  <line x1="140" y1="220" x2="420" y2="220" stroke="#7a7a95" stroke-width="2"/>
+
+  <line x1="280" y1="220" x2="280" y2="240" stroke="#7a7a95" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="170" y="240" width="220" height="50" rx="10" fill="#e8eaf0" stroke="#6b6b88" stroke-width="2"/>
+  <text x="280" y="262" text-anchor="middle" font-size="13" font-weight="600" fill="#2a2a3e">agent = XxxAgent(tools=TC)</text>
+  <text x="280" y="280" text-anchor="middle" font-size="11" fill="#3d3d58">agent.__dict__["llm"] = adapter</text>
+</svg>
+<div class="caption">图 10：Agent 组装流程 — 配置 → LLM → adapter → agent 注入</div>
+</div>
+
+<!-- 13. LLM 提供商 -->
+<h2 id="providers">13. 支持的 LLM 提供商</h2>
+<table>
+  <thead><tr><th>提供商</th><th>LangChain 类</th><th>环境变量</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Anthropic</strong></td><td><code>ChatAnthropic</code></td><td><code>ANTHROPIC_API_KEY</code>, <code>ANTHROPIC_BASE_URL</code></td></tr>
+    <tr><td><strong>OpenAI</strong></td><td><code>ChatOpenAI</code></td><td><code>OPENAI_API_KEY</code>, <code>OPENAI_BASE_URL</code></td></tr>
+    <tr><td><strong>DeepSeek</strong></td><td><code>ChatOpenAI(base_url=...)</code></td><td><code>DEEPSEEK_API_KEY</code></td></tr>
+    <tr><td><strong>Ollama</strong></td><td><code>ChatOllama</code></td><td><code>OLLAMA_BASE_URL</code></td></tr>
+  </tbody>
+</table>
+
+<!-- 14. 模块映射 -->
+<h2 id="modules">14. 模块映射（当前实现）</h2>
+<table>
+  <thead><tr><th>模块</th><th>文件</th><th>依赖</th></tr></thead>
+  <tbody>
+    <tr><td>ResearchState</td><td><code>src/graph/state.py</code></td><td>langgraph</td></tr>
+    <tr><td>LangGraph 工作流</td><td><code>src/graph/workflow.py</code></td><td>langgraph, OpenManus</td></tr>
+    <tr><td>Agent 节点</td><td><code>src/graph/nodes.py</code></td><td>OpenManus</td></tr>
+    <tr><td>6 个专用 Agent</td><td><code>src/agents/specialized.py</code></td><td>OpenManus ToolCallAgent</td></tr>
+    <tr><td>LLMAdapter</td><td><code>src/agents/llm_adapter.py</code></td><td>LangChain, OpenManus</td></tr>
+    <tr><td>AgentLLMConfig / create_llm</td><td><code>src/llm/config.py</code></td><td>LangChain</td></tr>
+    <tr><td>短期记忆</td><td>OpenManus <code>app.schema.Memory</code></td><td>-</td></tr>
+    <tr><td>长期记忆</td><td><code>src/memory/long_term.py</code></td><td>chromadb</td></tr>
+    <tr><td>BaseTool</td><td>OpenManus <code>app.tool.base.BaseTool</code></td><td>-</td></tr>
+    <tr><td>ToolCollection</td><td>OpenManus <code>app.tool.ToolCollection</code></td><td>-</td></tr>
+    <tr><td>搜索工具</td><td><code>src/tools/search/tools.py</code></td><td>OpenManus BaseTool</td></tr>
+    <tr><td>分析工具</td><td><code>src/tools/analysis/tools.py</code></td><td>OpenManus BaseTool</td></tr>
+    <tr><td>导出工具</td><td><code>src/tools/export/tools.py</code></td><td>OpenManus BaseTool</td></tr>
+    <tr><td>agents.yaml</td><td><code>config/agents.yaml</code></td><td>-</td></tr>
+    <tr><td>research.yaml</td><td><code>config/research.yaml</code></td><td>-</td></tr>
+    <tr><td>CLI 入口</td><td><code>src/main.py</code></td><td>typer, rich, LangGraph</td></tr>
+  </tbody>
+</table>
+
+<!-- 15. 已知限制 -->
+<h2 id="limitations">15. 已知限制</h2>
+<div class="card callout-warn">
+  <ul style="list-style: none; padding: 0;">
+    <li style="padding: 6px 0; color:#1a1a2e;">⚠️ Searcher 当前串行执行多个 query（LangGraph Send API 并行方案预留未实现）</li>
+    <li style="padding: 6px 0; color:#1a1a2e;">⚠️ 报告仅支持 Markdown 格式（PDF/Word/HTML 待扩展）</li>
+    <li style="padding: 6px 0; color:#1a1a2e;">⚠️ 无 Token 计数和成本统计</li>
+    <li style="padding: 6px 0; color:#1a1a2e;">⚠️ 长期记忆未深度集成到工作流中</li>
+    <li style="padding: 6px 0; color:#1a1a2e;">⚠️ 引用提取依赖 LLM 自行解析，未做结构化处理</li>
+  </ul>
+</div>
+
+<!-- 页脚导航 -->
+<div class="card" style="margin-top:40px;">
+  <p style="text-align:center; color:var(--text-muted); font-size:14px; margin:0;">
+    <a href="tools.html" style="color:var(--accent);font-weight:600;">工具文档 →</a>
+    &nbsp;&nbsp;|&nbsp;&nbsp;
+    <a href="changelog.html" style="color:var(--accent);font-weight:600;">变更日志 →</a>
+  </p>
+</div>
+
+</div><!-- /.main -->
+
+<script>
+mermaid.initialize({
+  startOnLoad: true,
+  theme: 'base',
+  securityLevel: 'loose',
+  themeVariables: {
+    primaryColor: '#5b4af5',
+    primaryTextColor: '#ffffff',
+    primaryBorderColor: '#3d31a8',
+    lineColor: '#4a4a6a',
+    secondaryColor: '#f0edff',
+    secondaryTextColor: '#1a1a2e',
+    tertiaryColor: '#f5f6f8',
+    tertiaryTextColor: '#1a1a2e',
+    fontSize: '14px',
+    fontFamily: '"PingFang SC","Microsoft YaHei",sans-serif',
+  }
+});</script>
+</body>
+</html>

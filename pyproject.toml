@@ -1,0 +1,54 @@
+[project]
+name = "multi-agent-research"
+version = "0.1.0"
+description = "Multi-agent research assistant with LangGraph"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # LangGraph & LangChain
+    "langgraph>=0.2.0",
+    "langchain>=0.3.0",
+    "langchain-core>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "langchain-anthropic>=0.3.0",
+    "langchain-community>=0.3.0",
+    # Vendored framework (src/_framework/)
+    "openai>=1.66.0",
+    "pydantic>=2.0.0",
+    "tenacity>=9.0.0",
+    "tiktoken>=0.9.0",
+    "pyyaml>=6.0",
+    "loguru>=0.7.0",
+    "structlog>=24.0.0",
+    # Research tools
+    "chromadb>=0.5.0",
+    "anthropic>=0.40.0",
+    "httpx>=0.27.0",
+    "python-dotenv>=1.0",
+    "arxiv>=2.1.0",
+    "wikipedia>=1.4.0",
+    "markdown>=3.7.0",
+    # MCP (Model Context Protocol)
+    "mcp>=1.0.0",
+    "fastmcp>=2.0.0",
+    # CLI & UI
+    "rich>=13.0.0",
+    "typer>=0.12.0",
+    "docker>=7.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[tool.uv]
+dev-dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

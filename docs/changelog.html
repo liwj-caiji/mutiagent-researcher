@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>变更日志 — 多 Agent 研究助手</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --card-bg: #ffffff;
+    --text: #1a1a2e;
+    --text-muted: #4a4a6a;
+    --border: #d0d5dd;
+    --accent: #5b4af5;
+    --code-bg: #1a1a2e;
+    --code-text: #e2e4f0;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.75;
+  }
+  .sidebar {
+    position: fixed; left:0; top:0; bottom:0; width: 260px;
+    background: #16143a; color: #cfd0e8; padding: 24px 0; overflow-y: auto; z-index: 100;
+  }
+  .sidebar h2 {
+    font-size: 15px; font-weight: 600; padding: 0 24px 16px;
+    color: #b8baf0; letter-spacing: .04em;
+  }
+  .sidebar a {
+    display: block; padding: 8px 24px; color: #8b8ed8;
+    text-decoration: none; font-size: 14px; transition: all .15s;
+    border-left: 3px solid transparent;
+  }
+  .sidebar a:hover, .sidebar a.active {
+    color: #ffffff; background: rgba(255,255,255,.1); border-left-color: #9089f8;
+  }
+  .sidebar a.sub { padding-left: 40px; font-size: 13px; }
+  .main { margin-left: 260px; max-width: 980px; padding: 40px 52px 80px; }
+  h1 { font-size: 2.1em; margin-bottom: 8px; font-weight: 700; color: #16143a; }
+  h2 {
+    font-size: 1.5em; margin: 44px 0 18px; padding-bottom: 10px;
+    border-bottom: 2px solid var(--border); font-weight: 700; color: #2a2568;
+  }
+  h3 { font-size: 1.15em; margin: 22px 0 10px; font-weight: 600; color: #3d31a8; }
+  h4 { font-size: 1.02em; margin: 16px 0 6px; font-weight: 600; color: #1a1a2e; }
+  .subtitle { font-size: 16px; color: var(--text-muted); margin-bottom: 32px; }
+  .card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; margin: 16px 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .mermaid-wrap {
+    background: #fff; border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; margin: 20px 0;
+    overflow-x: auto; text-align: center;
+  }
+  .mermaid-wrap .caption { font-size: 13px; color: var(--text-muted); margin-top: 12px; font-style: italic; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px;
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  }
+  th { background: #e8eaf0; font-weight: 600; padding: 10px 14px; text-align: left; color: #1a1a2e; }
+  td { padding: 10px 14px; border-top: 1px solid var(--border); color: #1a1a2e; }
+  tr:nth-child(even) td { background: #f8f8fb; }
+  pre {
+    background: var(--code-bg); color: var(--code-text);
+    padding: 18px 22px; border-radius: 10px; overflow-x: auto;
+    font-size: 13px; line-height: 1.7; margin: 14px 0;
+  }
+  code { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; }
+  :not(pre) > code {
+    background: #e8eaf0; color: #c7254e; padding: 2px 6px; border-radius: 4px; font-size: 13px; font-weight: 500;
+  }
+  .version-badge {
+    display: inline-block; padding: 6px 18px; border-radius: 24px;
+    font-size: 1.1em; font-weight: 700; letter-spacing: .02em; margin-bottom: 8px;
+  }
+  .v02 { background: #e0e5ff; color: #1e38b8; border: 2px solid #3b5df6; }
+  .v01 { background: #daf5e8; color: #0d6b48; border: 2px solid #0d8a5e; }
+  .callout {
+    border-left: 4px solid #5b4af5; background: #f0edff;
+    padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 16px 0; font-size: 14px;
+    color: #1a1a2e;
+  }
+  .tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 600; margin-right: 4px;
+  }
+  .tag-added { background: #e0f5ee; color: #0d7a52; }
+  .tag-changed { background: #fff5e0; color: #b05d0c; }
+  .tag-deleted { background: #fde8e8; color: #c42a2a; }
+  ul, ol { padding-left: 20px; }
+  li { margin: 4px 0; font-size: 14px; color: #1a1a2e; }
+  .svg-box {
+    background: #fff; border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; margin: 20px 0;
+    text-align: center; overflow-x: auto;
+  }
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; padding: 24px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <h2>文档导航</h2>
+  <a href="architecture.html">架构设计</a>
+  <a href="tools.html">工具文档</a>
+  <a href="changelog.html" class="active">变更日志</a>
+  <a href="#v0.2.0" class="sub">v0.2.0</a>
+  <a href="#v0.1.0" class="sub">v0.1.0</a>
+  <a href="#diff" class="sub">版本对比</a>
+</nav>
+
+<div class="main">
+
+<h1>变更日志</h1>
+<p class="subtitle">记录项目开发过程中的所有变更，包含设计决策及其原因</p>
+
+<!-- 时间线 -->
+<h2 id="timeline">项目时间线</h2>
+<div class="mermaid-wrap">
+<pre class="mermaid">
+timeline
+    title 多 Agent 研究助手 — 开发时间线
+    2026-06-01 : v0.1.0 — 项目初始化
+               : LLM 配置工厂（4 种 Provider）
+               : 自建 Agent 基座（v0.2.0 中删除）
+               : 6 个专用 Agent
+               : 7 个工具（搜索 / 分析 / 导出）
+               : LangGraph 编排
+               : 记忆系统（短期 + 长期）
+               : CLI 入口（typer）
+
+    2026-06-01 : v0.2.0 — 引入 OpenManus
+               : 克隆 OpenManus_origin/
+               : 删除自建 Agent 基座
+               : 6 个 Agent 改为继承 ToolCallAgent
+               : 新增 LLMAdapter 桥接层
+               : 工具改为继承 BaseTool
+               : 更新全部文档
+</pre>
+  <div class="caption">两个版本均在 2026-06-01 完成。v0.1.0 搭建基础，v0.2.0 用成熟的 OpenManus 替换自建 Agent 基座。</div>
+</div>
+
+<!-- ═══ V0.2.0 ═══ -->
+<h2 id="v0.2.0"><span class="version-badge v02">v0.2.0</span> — 2026-06-01</h2>
+<p style="color:var(--text-muted);font-size:14px;margin-top:4px;">引入原始 OpenManus（FoundationAgents/OpenManus）作为 Agent 基座</p>
+
+<h3><span class="tag tag-changed">变更</span> Changed</h3>
+<div class="card">
+  <h4>引入原始 OpenManus（FoundationAgents/OpenManus）作为 Agent 基座</h4>
+  <ul>
+    <li>新增 <code>OpenManus_origin/</code> 目录（从 GitHub 克隆）</li>
+    <li>删除自实现的 <code>src/agents/base.py</code>、<code>react_agent.py</code>、<code>tool_call_agent.py</code></li>
+    <li><code>specialized.py</code> 中 6 个 Agent 改为继承 OpenManus 的 <code>ToolCallAgent</code></li>
+    <li>新增 <code>src/agents/llm_adapter.py</code> — 桥接 OpenManus LLM 接口到 LangChain 多 provider</li>
+    <li>所有工具改为继承 OpenManus 的 <code>BaseTool</code></li>
+    <li><code>pyproject.toml</code> 新增 OpenManus 核心依赖（openai, tenacity, loguru）</li>
+  </ul>
+
+  <h4>LLMAdapter</h4>
+  <p>包装 LangChain <code>BaseChatModel</code>，对外暴露 OpenManus 兼容的 <code>ask_tool()</code> 接口，原生支持 Anthropic / OpenAI / DeepSeek / Ollama。</p>
+
+  <h4>工作流集成</h4>
+  <p>在 <code>build_workflow</code> 中使用 <code>_create_agent()</code> 工厂函数，绕过 OpenManus 的 Pydantic <code>model_validator</code>，通过 <code>agent.__dict__["llm"]</code> 注入 LLMAdapter。</p>
+</div>
+
+<h3>变更原因</h3>
+<div class="callout">
+  <p>原始 OpenManus 提供了成熟的 ReAct + ToolCall 循环实现，包括：</p>
+  <ul>
+    <li>基于 Pydantic 的 Agent 配置和状态管理</li>
+    <li>完善的 think()/act() 循环和工具执行</li>
+    <li>重复检测（stuck detection）</li>
+    <li>Terminate 工具集成</li>
+  </ul>
+  <p>引入后我们只需关注 Agent 的 system prompt 和工具配置，不维护 Agent 执行循环。</p>
+</div>
+
+<h3>架构对比：变更前 vs 变更后</h3>
+<div class="mermaid-wrap">
+<pre class="mermaid">
+graph TB
+    subgraph V01["v0.1.0 — 自建 Agent 基座"]
+        direction TB
+        SB["src/agents/base.py<br/>BaseAgent"]
+        SR["src/agents/react_agent.py<br/>ReActAgent"]
+        ST["src/agents/tool_call_agent.py<br/>ToolCallAgent"]
+        S6["specialized.py<br/>6 个 Agent"]
+
+        SB --> SR --> ST --> S6
+    end
+
+    subgraph V02["v0.2.0 — OpenManus Agent 基座"]
+        direction TB
+        OB["OpenManus_origin/<br/>app/agent/base.py<br/>BaseAgent"]
+        OR["app/agent/react.py<br/>ReActAgent"]
+        OT["app/agent/toolcall.py<br/>ToolCallAgent"]
+        O6["specialized.py<br/>6 个 Agent"]
+        LA["llm_adapter.py<br/>LLMAdapter 桥接层"]
+
+        OB --> OR --> OT --> O6
+        LA -.->|"包装 LangChain"| O6
+    end
+
+    V01 -.->|"已删除"| V02
+
+    style V01 fill:#fde8e8,stroke:#e04040
+    style V02 fill:#e0f5ee,stroke:#0d8a5e
+    style SB stroke-dasharray:5
+    style SR stroke-dasharray:5
+    style ST stroke-dasharray:5
+</pre>
+  <div class="caption">v0.2.0 核心变化：用成熟的 OpenManus 替换自建 Agent 基座，新增 LLMAdapter 作为桥接</div>
+</div>
+
+<!-- ═══ V0.1.0 ═══ -->
+<h2 id="v0.1.0"><span class="version-badge v01">v0.1.0</span> — 2026-06-01</h2>
+<p style="color:var(--text-muted);font-size:14px;margin-top:4px;">项目初始化，搭建完整基础架构</p>
+
+<h3><span class="tag tag-added">新增</span> Added</h3>
+<div class="card">
+
+<h4>项目初始化</h4>
+<ul>
+  <li>使用 <code>uv</code> 管理环境，创建项目骨架结构</li>
+</ul>
+
+<h4>LLM 配置工厂（<code>src/llm/</code>）</h4>
+<ul>
+  <li>支持 Anthropic、OpenAI、DeepSeek、Ollama 四种 provider</li>
+  <li>每个 Agent 可独立配置</li>
+</ul>
+
+<h4>Agent 基础架构（<code>src/agents/</code>）</h4>
+<ul>
+  <li><code>BaseAgent</code> — 状态管理、生命周期控制</li>
+  <li><code>ReActAgent</code> — Think → Act → Observe 循环</li>
+  <li><code>ToolCallAgent</code> — 工具调用机制、JSON Schema 解析</li>
+</ul>
+
+<h4>6 个专用研究 Agent（<code>src/agents/specialized.py</code>）</h4>
+<table>
+  <thead><tr><th>Agent</th><th>职责</th></tr></thead>
+  <tbody>
+    <tr><td><strong>PlannerAgent 规划器</strong></td><td>主题分解、大纲生成、缺口分析</td></tr>
+    <tr><td><strong>SearcherAgent 搜索器</strong></td><td>多源信息检索（Web、arXiv、Wikipedia）</td></tr>
+    <tr><td><strong>AnalystAgent 分析师</strong></td><td>深度分析、交叉验证、矛盾识别</td></tr>
+    <tr><td><strong>SynthesizerAgent 综合器</strong></td><td>综合归纳、逻辑框架构建</td></tr>
+    <tr><td><strong>WriterAgent 撰写器</strong></td><td>结构化报告撰写</td></tr>
+    <tr><td><strong>CriticAgent 审查器</strong></td><td>质量评分、事实核查、缺口识别</td></tr>
+  </tbody>
+</table>
+
+<h4>工具层（<code>src/tools/</code>）</h4>
+<ul>
+  <li><strong>搜索工具：</strong>WebSearchTool（Tavily/DuckDuckGo）、ArxivSearchTool、WikipediaSearchTool、WebScraperTool</li>
+  <li><strong>分析工具：</strong>PythonExecuteTool</li>
+  <li><strong>导出工具：</strong>CitationFormatterTool、ReportSaverTool</li>
+  <li><strong>基础设施：</strong>BaseTool + ToolRegistry</li>
+</ul>
+
+<h4>记忆系统（<code>src/memory/</code>）</h4>
+<ul>
+  <li><code>Memory</code> — 短期对话历史管理（max_messages 限制）</li>
+  <li><code>LongTermMemory</code> — ChromaDB 持久化研究知识</li>
+</ul>
+
+<h4>LangGraph 编排（<code>src/graph/</code>）</h4>
+<ul>
+  <li><code>ResearchState</code> — TypedDict 共享状态（支持 Annotated reducers 并行合并）</li>
+  <li>6 个节点实现：planner → searcher → analyst → synthesizer → writer → critic → formatter</li>
+  <li>Supervisor 条件路由：质量不通过自动重试（最多 N 轮）</li>
+  <li>SQLite checkpointer 支持（可选）</li>
+</ul>
+
+<h4>配置系统（<code>config/</code>）</h4>
+<ul>
+  <li><code>agents.yaml</code> — 每个 Agent 独立模型配置</li>
+  <li><code>research.yaml</code> — 研究流程参数（轮次、阈值、搜索源等）</li>
+</ul>
+
+<h4>CLI 入口（<code>src/main.py</code>）</h4>
+<ul>
+  <li><code>uv run python -m src.main "研究主题"</code> 一键启动</li>
+  <li><code>--config</code> / <code>--agents</code> 参数指定配置文件</li>
+  <li><code>--verbose</code> 调试模式</li>
+</ul>
+
+<h4>文档（<code>docs/</code>）</h4>
+<ul>
+  <li><code>architecture.md</code> — 完整架构设计文档</li>
+  <li><code>changelog.md</code> — 本文件</li>
+</ul>
+</div>
+
+<h3>设计决策</h3>
+<table>
+  <thead><tr><th style="width:300px;">决策</th><th>原因</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>使用 LangGraph StateGraph 而非自建流程引擎</td>
+      <td>LangGraph 提供 checkpointing、条件路由、并行 Send API，减少造轮子</td>
+    </tr>
+    <tr>
+      <td>Supervisor-Worker 拓扑而非 Peer-to-Peer</td>
+      <td>研究任务适合线性+回退流程，Supervisor 模式简单可靠</td>
+    </tr>
+    <tr>
+      <td>每个 Agent 独立 LLM 配置</td>
+      <td>不同任务适合不同模型（搜索用便宜模型，分析用强模型），降低成本</td>
+    </tr>
+    <tr>
+      <td>BaseAgent + ReActAgent + ToolCallAgent 继承体系</td>
+      <td>参考 OpenManus 的成熟设计，职责分层清晰</td>
+    </tr>
+    <tr>
+      <td>工具层不直接使用 LangChain 工具类</td>
+      <td>自己的 BaseTool 提供更好的可控性，通过 to_langchain_tool() 桥接</td>
+    </tr>
+    <tr>
+      <td>ChromaDB 用作长期记忆</td>
+      <td>轻量嵌入方案，支持相似度检索，本地部署</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>已知限制（v0.1.0）</h3>
+<div class="card" style="border-left: 4px solid #e6990a; background: #fff9ed;">
+  <ul>
+    <li>并行 Searcher 使用 Send API 的方案尚未实现（当前为串行搜索多个 query）</li>
+    <li>报告目前仅支持 Markdown 格式导出（PDF/Word 待扩展）</li>
+    <li>缺乏完善的 Token 计数和成本统计</li>
+    <li>长期记忆的相似度检索尚未充分集成到工作流中</li>
+    <li>搜索结果的引用格式提取较简单（依赖 LLM 自行解析）</li>
+  </ul>
+</div>
+
+<!-- ═══ 版本对比 ═══ -->
+<h2 id="diff">v0.1.0 → v0.2.0：变更了什么？</h2>
+<div class="svg-box">
+<svg viewBox="0 0 760 300" width="100%" max-width="760" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="sh"><feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.12"/></filter>
+  </defs>
+
+  <!-- 左：v0.1.0 -->
+  <rect x="10" y="10" width="340" height="280" rx="12" fill="#fde8e8" stroke="#e04040" stroke-width="2" filter="url(#sh)"/>
+  <text x="180" y="40" text-anchor="middle" font-size="16" font-weight="700" fill="#c02020">v0.1.0 — 自建基座</text>
+
+  <rect x="25" y="55" width="310" height="32" rx="6" fill="#fff" stroke="#f0b8b8" stroke-width="1"/>
+  <text x="40" y="76" font-size="12" fill="#8b1a1a">src/agents/base.py（自建）</text>
+  <rect x="25" y="92" width="310" height="32" rx="6" fill="#fff" stroke="#f0b8b8" stroke-width="1"/>
+  <text x="40" y="113" font-size="12" fill="#8b1a1a">src/agents/react_agent.py（自建）</text>
+  <rect x="25" y="129" width="310" height="32" rx="6" fill="#fff" stroke="#f0b8b8" stroke-width="1"/>
+  <text x="40" y="150" font-size="12" fill="#8b1a1a">src/agents/tool_call_agent.py（自建）</text>
+  <rect x="25" y="166" width="310" height="32" rx="6" fill="#fff" stroke="#f0b8b8" stroke-width="1"/>
+  <text x="40" y="187" font-size="12" fill="#8b1a1a">LLM 仅支持 AsyncOpenAI</text>
+  <rect x="25" y="203" width="310" height="32" rx="6" fill="#fff" stroke="#f0b8b8" stroke-width="1"/>
+  <text x="40" y="224" font-size="12" fill="#8b1a1a">自建 ToolRegistry</text>
+
+  <text x="180" y="265" text-anchor="middle" font-size="11" fill="#c42a2a">需要维护 5 个文件</text>
+
+  <!-- 中间箭头 -->
+  <rect x="350" y="110" width="60" height="32" rx="16" fill="#5b4af5"/>
+  <text x="380" y="131" text-anchor="middle" font-size="18" fill="#fff">→</text>
+
+  <!-- 右：v0.2.0 -->
+  <rect x="410" y="10" width="340" height="280" rx="12" fill="#e0f5ee" stroke="#0d8a5e" stroke-width="2" filter="url(#sh)"/>
+  <text x="580" y="40" text-anchor="middle" font-size="16" font-weight="700" fill="#0d6b48">v0.2.0 — 引入 OpenManus</text>
+
+  <rect x="425" y="55" width="310" height="32" rx="6" fill="#fff" stroke="#a0e0c0" stroke-width="1"/>
+  <text x="440" y="76" font-size="12" fill="#065a3a">OpenManus_origin/（成熟基座）</text>
+  <rect x="425" y="92" width="310" height="32" rx="6" fill="#fff" stroke="#a0e0c0" stroke-width="1"/>
+  <text x="440" y="113" font-size="12" fill="#065a3a">LLMAdapter — 多 Provider 桥接</text>
+  <rect x="425" y="129" width="310" height="32" rx="6" fill="#fff" stroke="#a0e0c0" stroke-width="1"/>
+  <text x="440" y="150" font-size="12" fill="#065a3a">4 种 Provider（Anthropic/OpenAI/DeepSeek/Ollama）</text>
+  <rect x="425" y="166" width="310" height="32" rx="6" fill="#fff" stroke="#a0e0c0" stroke-width="1"/>
+  <text x="440" y="187" font-size="12" fill="#065a3a">OpenManus ToolCollection</text>
+  <rect x="425" y="203" width="310" height="32" rx="6" fill="#fff" stroke="#a0e0c0" stroke-width="1"/>
+  <text x="440" y="224" font-size="12" fill="#065a3a">内置 stuck 重复检测</text>
+
+  <text x="580" y="265" text-anchor="middle" font-size="11" fill="#0d7a52">只需关注 prompt 和工具配置</text>
+</svg>
+<div class="caption">核心转变：从维护 Agent 执行基础设施 → 利用成熟开源基座，聚焦业务逻辑</div>
+</div>
+
+<!-- 页脚 -->
+<div class="card" style="margin-top:40px;">
+  <p style="text-align:center;color:var(--text-muted);font-size:14px;margin:0;">
+    <a href="architecture.html" style="color:var(--accent);font-weight:600;">← 架构设计</a>
+    &nbsp;&nbsp;|&nbsp;&nbsp;
+    <a href="tools.html" style="color:var(--accent);font-weight:600;">工具文档 →</a>
+  </p>
+</div>
+
+</div><!-- /.main -->
+
+<script>
+mermaid.initialize({
+  startOnLoad: true,
+  theme: 'base',
+  securityLevel: 'loose',
+  themeVariables: {
+    primaryColor: '#5b4af5',
+    primaryTextColor: '#ffffff',
+    primaryBorderColor: '#3d31a8',
+    lineColor: '#4a4a6a',
+    secondaryColor: '#f0edff',
+    secondaryTextColor: '#1a1a2e',
+    tertiaryColor: '#f5f6f8',
+    tertiaryTextColor: '#1a1a2e',
+    fontSize: '14px',
+    fontFamily: '"PingFang SC","Microsoft YaHei",sans-serif',
+  }
+});
+</body>
+</html>

@@ -1,0 +1,74 @@
+# Research workflow configuration
+
+# Maximum number of research iterations (plan → search → ... → critic)
+max_rounds: 1
+
+# Quality thresholds for each round (must be met to skip re-planning)
+quality_thresholds:
+  round_1: 40
+  round_2: 50
+  round_3: 60
+
+# Default quality threshold (used if round not in quality_thresholds)
+quality_threshold: 50
+
+# Search sources — what to search in parallel
+search_sources:
+  - web
+  - arxiv
+  - wikipedia
+
+# Max search results per source
+max_search_results_per_source: 5
+
+# Max queries per search round
+max_search_queries: 2
+
+# Max agent turns (ReAct loop iterations) per task
+max_agent_turns:
+  planner: 2
+  searcher: 2
+  analyst: 2
+  synthesizer: 2
+  writer: 2
+  critic: 1
+
+# Wall-clock timeout per agent (seconds) — prevents infinite hangs
+agent_timeouts:
+  planner: 300
+  searcher: 600
+  analyst: 600
+  synthesizer: 600
+  writer: 900
+  critic: 300
+
+# Output settings
+output_dir: ./reports
+output_formats:
+  - markdown
+
+# Language: "zh" for Chinese, "en" for English
+language: zh
+
+# Long-term memory (ChromaDB)
+use_long_term_memory: false
+memory_persist_dir: ./data/chroma
+
+# MCP (Model Context Protocol) tool servers
+mcp:
+  enabled: true  # Set to true to use MCP servers instead of in-process tools
+  transport: stdio
+  servers:
+    search:
+      command: uv
+      args: ["run", "python", "-m", "src.tools.search.mcp_server"]
+    analysis:
+      command: uv
+      args: ["run", "python", "-m", "src.tools.analysis.mcp_server"]
+    export:
+      command: uv
+      args: ["run", "python", "-m", "src.tools.export.mcp_server"]
+
+# Enable checkpointer for crash recovery
+use_checkpointer: false
+checkpointer_path: ./data/checkpoints.sqlite

@@ -1,0 +1,52 @@
+# Agent-specific LLM configurations.
+# Each agent can use a different model provider.
+#
+# Model assignment strategy:
+#   Simple tasks  → deepseek-v4-flash (fast, cost-effective)
+#   Complex tasks → deepseek-v4-pro  (strong reasoning)
+
+default:
+  provider: deepseek
+  model: deepseek-v4-flash
+  temperature: 0.3
+  max_tokens: 4096
+
+# ── Simple tasks (flash) ────────────────────────────────────────────
+
+planner:
+  provider: deepseek
+  model: deepseek-v4-flash
+  temperature: 0.2
+  max_tokens: 4096
+
+searcher:
+  provider: deepseek
+  model: deepseek-v4-flash
+  temperature: 0.1
+  max_tokens: 2048
+
+writer:
+  provider: deepseek
+  model: deepseek-v4-flash
+  temperature: 0.5
+  max_tokens: 8192
+
+# ── Complex tasks (pro) ─────────────────────────────────────────────
+
+analyst:
+  provider: deepseek
+  model: deepseek-v4-flash
+  temperature: 0.4
+  max_tokens: 8192
+
+synthesizer:
+  provider: deepseek
+  model: deepseek-v4-flash
+  temperature: 0.4
+  max_tokens: 8192
+
+critic:
+  provider: deepseek
+  model: deepseek-v4-flash
+  temperature: 0.2
+  max_tokens: 4096
