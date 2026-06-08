@@ -221,14 +221,26 @@ class CriticAgent(ToolCallAgent):
             if msgs:
                 source = msgs[-1].content or ""
 
-        json_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', source, re.DOTALL)
+        # Try to extract JSON from code fences (robust: allow optional newlines)
+        json_match = re.search(r'```(?:json)?\s*(.*?)```', source, re.DOTALL)
         if json_match:
             try:
                 return json.loads(json_match.group(1))
             except json.JSONDecodeError:
                 pass
-        try:
-            return json.loads(source)
-        except json.JSONDecodeError:
-            pass
+
+        # Try to find a JSON object anywhere in the response
+        json_match = re.search(r'\{[^{}]*"overall_score"[^{}]*\}', source, re.DOTALL)
+        if json_match:
+            try:
+                return json.loads(json_match.group(0))
+            except json.JSONDecodeError:
+                pass
+
+        # Fallback: extract overall_score with a simple regex (quoted or bare key)
+        score_match = re.search(r'(?:"overall_score"|overall_score)\s*[:=]\s*(\d+)', source)
+        if score_match:
+            score = int(score_match.group(1))
+            return {"overall_score": score, "gaps": [], "recommendation": "accept" if score >= 65 else "revise"}
+
         return {"overall_score": 0, "gaps": [], "recommendation": "revise"}
