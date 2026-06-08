@@ -32,8 +32,17 @@ from src.graph.workflow import build_workflow
 from src.graph.state import ResearchState
 from src.llm.config import AgentLLMConfig
 from src.tools.mcp import MCPManager
-from src.tools.search.tools import ArxivSearchTool, WebScraperTool, WebSearchTool, WikipediaSearchTool
-from src.tools.export.tools import CitationFormatterTool, ReportSaverTool
+from src.tools.search import (
+    ArxivSearchTool,
+    BraveSearchTool,
+    DuckDuckGoTool,
+    JinaReaderTool,
+    TavilySearchTool,
+    WebScraperTool,
+    WikipediaSearchTool,
+)
+from src.tools.export import CitationFormatterTool
+from src.tools.analysis import PythonExecuteTool
 
 app = typer.Typer(no_args_is_help=True)
 console = Console()
@@ -95,14 +104,18 @@ async def build_tool_collections(research_cfg: dict) -> tuple[dict[str, ToolColl
     if not mcp_manager.enabled:
         # In-process fallback (original behavior)
         search_tools = [
-            WebSearchTool(), ArxivSearchTool(),
-            WikipediaSearchTool(), WebScraperTool(), terminate,
+            BraveSearchTool(), TavilySearchTool(),
+            DuckDuckGoTool(),
+            ArxivSearchTool(), WikipediaSearchTool(),
+            JinaReaderTool(), WebScraperTool(),
+            terminate,
         ]
         writer_tools = [CitationFormatterTool(), terminate]
+        analyst_tools = [PythonExecuteTool(), terminate]
         return {
             "planner": ToolCollection(terminate),
             "searcher": ToolCollection(*search_tools),
-            "analyst": ToolCollection(terminate),
+            "analyst": ToolCollection(*analyst_tools),
             "synthesizer": ToolCollection(terminate),
             "writer": ToolCollection(*writer_tools),
             "critic": ToolCollection(terminate),
@@ -113,9 +126,9 @@ async def build_tool_collections(research_cfg: dict) -> tuple[dict[str, ToolColl
     tool_dict = {
         "planner": await mcp_manager.create_tool_collection([], [terminate]),
         "searcher": await mcp_manager.create_tool_collection(["search"], [terminate]),
-        "analyst": await mcp_manager.create_tool_collection([], [terminate]),
+        "analyst": await mcp_manager.create_tool_collection([], [PythonExecuteTool(), terminate]),
         "synthesizer": await mcp_manager.create_tool_collection([], [terminate]),
-        "writer": await mcp_manager.create_tool_collection(["export"], [terminate]),
+        "writer": await mcp_manager.create_tool_collection([], [CitationFormatterTool(), terminate]),
         "critic": await mcp_manager.create_tool_collection([], [terminate]),
     }
     console.print("[green]MCP tool servers connected.[/green]")
