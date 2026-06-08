@@ -7,6 +7,7 @@ Anthropic, OpenAI, DeepSeek, and Ollama providers natively.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,6 +18,8 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.language_models import BaseChatModel
 
 from src.llm.config import AgentLLMConfig, create_llm
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -134,7 +137,13 @@ class LLMAdapter:
                 tool_calls=tool_calls if tool_calls else None,
             )
         except Exception:
-            return None
+            logger.exception(
+                "LLM call failed (provider=%s, model=%s, messages_count=%d)",
+                getattr(self._chat_model, 'provider', 'unknown'),
+                self.model,
+                len(lc_messages),
+            )
+            raise
 
     def _should_use_tools(self, tool_choice: Any) -> bool:
         if tool_choice is None:
