@@ -1,10 +1,8 @@
-"""Export tools — extend OpenManus BaseTool."""
+"""Export tool implementations — citation formatting."""
 
 from __future__ import annotations
 
 import json
-from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
 from src._framework import BaseTool, ToolResult
@@ -55,32 +53,3 @@ class CitationFormatterTool(BaseTool):
         return ToolResult(output="\n".join(formatted))
 
 
-class ReportSaverTool(BaseTool):
-    """Save the final report to a file."""
-
-    name: str = "report_saver"
-    description: str = "Save the research report content to a markdown file."
-    parameters: Optional[dict] = {
-        "type": "object",
-        "properties": {
-            "content": {"type": "string", "description": "Full report content in Markdown format"},
-            "filename": {"type": "string", "description": "Output filename"},
-        },
-        "required": ["content"],
-    }
-
-    def __init__(self, output_dir: str = "./reports", **data):
-        super().__init__(**data)
-        self._output_dir = Path(output_dir)
-        self._output_dir.mkdir(parents=True, exist_ok=True)
-
-    async def execute(self, **kwargs) -> ToolResult:
-        content = kwargs.get("content", "")
-        filename = kwargs.get("filename") or f"report-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
-
-        filepath = self._output_dir / filename
-        try:
-            filepath.write_text(content, encoding="utf-8")
-            return ToolResult(output=f"Report saved to: {filepath}")
-        except Exception as e:
-            return ToolResult(error=f"Failed to save report: {e}")

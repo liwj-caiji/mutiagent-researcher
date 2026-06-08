@@ -1,4 +1,4 @@
-"""Analysis tools — extend OpenManus BaseTool."""
+"""Analysis tool implementations — Python sandbox execution."""
 
 from __future__ import annotations
 
