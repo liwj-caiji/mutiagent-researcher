@@ -164,13 +164,13 @@ async def searcher_node(
     try:
         async with asyncio.timeout(timeout):
             for i, query in enumerate(queries[:query_count]):
-                _reset_agent(searcher)
                 request = (
                     f"Search for the following query. Use the search tools available to you.\n\n"
                     f"Query: {query}\n\n"
                     "For each result, record: title, source URL, key findings. Call Terminate when done."
                 )
-                await searcher.run(request)
+                # Use shared runner without progress — searcher manages its own progress
+                await _run_agent_with_progress(searcher, request, "searcher", progress=None, timeout=timeout)
 
                 assistant_msgs = [m for m in searcher.messages if m.role == "assistant" and m.content]
                 content = assistant_msgs[-1].content if assistant_msgs else "No results"
@@ -331,21 +331,13 @@ async def critic_node(
 
     overall = review.get("overall_score", 70)
     gaps = review.get("gaps", [])
-    recommendation = review.get("recommendation", "accept")
-
-    threshold = state.get("quality_threshold", 75)
     current_round = state.get("research_round", 1)
-    max_rounds = state.get("max_rounds", 3)
-
-    if recommendation == "accept" or overall >= threshold or current_round >= max_rounds:
-        next_phase = "reviewed"
-    else:
-        next_phase = "reviewed"
 
     return {
         "quality_score": overall,
         "critique": review,
         "gaps": gaps,
-        "current_phase": next_phase,
+        "current_phase": "reviewed",
         "overall_score": overall,
+        "research_round": current_round + 1,
     }

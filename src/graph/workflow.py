@@ -154,10 +154,8 @@ def _supervisor_router(state: ResearchState) -> Literal["planner", "formatter", 
     current_round = state.get("research_round", 1)
     max_rounds = state.get("max_rounds", 3)
 
-    state["research_round"] = current_round + 1
-
-    if score >= threshold or current_round >= max_rounds:
-        logger.info(f"[Supervisor] Quality {score} >= {threshold} → formatting")
+    if score >= threshold or current_round > max_rounds:
+        logger.info(f"[Supervisor] Quality {score} >= {threshold} or round {current_round} > {max_rounds} → formatting")
         return "formatter"
 
     logger.info(f"[Supervisor] Quality {score} < {threshold}, round {current_round}/{max_rounds} → re-planning")
