@@ -17,7 +17,6 @@ from src.agents.specialized import (
     AnalystAgent,
     CriticAgent,
     PlannerAgent,
-    SearcherAgent,
     SynthesizerAgent,
     WriterAgent,
 )
@@ -147,54 +146,79 @@ async def planner_node(
 
 async def searcher_node(
     state: ResearchState,
-    searcher: SearcherAgent,
+    searcher_factory,  # Callable[[], SearcherAgent] — creates a fresh agent per query
     progress: ProgressTracker | None = None,
     timeout: float = 600,
+    max_parallel: int = 3,
 ) -> dict:
-    """Execute searches for assigned queries."""
+    """Execute searches for assigned queries in parallel.
+
+    Each query gets its own SearcherAgent instance, isolated from others.
+    An asyncio.Semaphore limits concurrency to respect API rate limits.
+    Results are returned as a list and merged into ResearchState.search_results
+    via the operator.add reducer.
+    """
     queries = state.get("search_queries", [])
-    logger.info(f"[Searcher] Searching {len(queries)} queries...")
+    query_count = min(len(queries), 10)
+    max_parallel = max(1, min(max_parallel, query_count))
+    per_query_timeout = timeout / max_parallel if max_parallel > 0 else timeout
+    semaphore = asyncio.Semaphore(max_parallel)
+
+    logger.info(f"[Searcher] Searching {query_count} queries (max parallel: {max_parallel})...")
 
     if progress:
-        progress.agent_started("searcher", getattr(searcher, "max_steps", 10))
+        progress.agent_started("searcher", query_count)
 
-    results = []
-    query_count = min(len(queries), 10)
+    async def _search_one(query: str, index: int) -> dict:
+        """Run a single search query on its own agent instance."""
+        async with semaphore:
+            agent = searcher_factory()
+            request = (
+                f"Search for the following query. Use the search tools available to you.\n\n"
+                f"Query: {query}\n\n"
+                "For each result, record: title, source URL, key findings. Call Terminate when done."
+            )
+            try:
+                async with asyncio.timeout(per_query_timeout):
+                    await agent.run(request)
+            except asyncio.TimeoutError:
+                logger.warning(f"[Searcher] Query '{query[:60]}...' timed out after {per_query_timeout:.0f}s")
+                return {"query": query, "content": f"Search timed out after {per_query_timeout:.0f}s"}
+
+            assistant_msgs = [m for m in agent.messages if m.role == "assistant" and m.content]
+            content = assistant_msgs[-1].content if assistant_msgs else "No results"
+
+            if progress:
+                progress.agent_step_update("searcher", index + 1, query_count, f"query {index + 1}/{query_count}: {query[:40]}...")
+
+            return {"query": query, "content": content}
 
     try:
         async with asyncio.timeout(timeout):
-            for i, query in enumerate(queries[:query_count]):
-                request = (
-                    f"Search for the following query. Use the search tools available to you.\n\n"
-                    f"Query: {query}\n\n"
-                    "For each result, record: title, source URL, key findings. Call Terminate when done."
-                )
-                # Use shared runner without progress — searcher manages its own progress
-                await _run_agent_with_progress(searcher, request, "searcher", progress=None, timeout=timeout)
+            tasks = [_search_one(query, i) for i, query in enumerate(queries[:query_count])]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
-                assistant_msgs = [m for m in searcher.messages if m.role == "assistant" and m.content]
-                content = assistant_msgs[-1].content if assistant_msgs else "No results"
-                results.append({"query": query, "content": content})
+        # Unwrap exceptions from gather
+        resolved: list[dict] = []
+        for i, r in enumerate(results):
+            if isinstance(r, Exception):
+                logger.error(f"[Searcher] Query {i + 1} failed: {r}")
+                resolved.append({"query": queries[i], "content": f"Error: {r}"})
+            else:
+                resolved.append(r)
 
-                if progress:
-                    progress.agent_step_update("searcher", i + 1, query_count, f"query {i + 1}/{query_count}")
+        if progress:
+            progress.agent_finished("searcher")
+
+        return {
+            "search_results": resolved,
+            "current_phase": "searched",
+        }
     except asyncio.TimeoutError:
         if progress:
             progress.agent_timeout("searcher", timeout)
         logger.error(f"[Searcher] Timed out after {timeout:.0f}s")
         raise RuntimeError(f"Agent 'searcher' timed out after {timeout:.0f}s") from None
-    except Exception:
-        if progress:
-            progress.agent_error("searcher", "failed")
-        raise
-
-    if progress and results:
-        progress.agent_finished("searcher")
-
-    return {
-        "search_results": results,
-        "current_phase": "searched",
-    }
 
 
 # ── Analyst Node ─────────────────────────────────────────────────────────────

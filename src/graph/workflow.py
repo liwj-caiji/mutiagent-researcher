@@ -72,6 +72,7 @@ def build_workflow(
     max_agent_turns: dict[str, int] | None = None,
     progress: ProgressTracker | None = None,
     agent_timeouts: dict[str, float] | None = None,
+    max_parallel_searches: int = 3,
 ) -> StateGraph:
     """Build and compile the research workflow StateGraph.
 
@@ -83,6 +84,7 @@ def build_workflow(
         max_agent_turns: Per-agent max step overrides (from config).
         progress: Optional ProgressTracker for real-time display.
         agent_timeouts: Per-agent wall-clock timeout in seconds.
+        max_parallel_searches: Max concurrent search queries (default 3).
 
     Returns:
         A compiled LangGraph StateGraph.
@@ -94,7 +96,11 @@ def build_workflow(
     agent_timeouts = agent_timeouts or {}
 
     planner = _create_agent(PlannerAgent, agent_configs.get("planner", default_cfg), tools.get("planner", _terminate), max_steps=max_agent_turns.get("planner"))
-    searcher = _create_agent(SearcherAgent, agent_configs.get("searcher", default_cfg), tools.get("searcher", _terminate), max_steps=max_agent_turns.get("searcher"))
+    # Searcher uses a factory to create isolated agent instances per parallel query
+    _searcher_cfg = agent_configs.get("searcher", default_cfg)
+    _searcher_tools = tools.get("searcher", _terminate)
+    _searcher_steps = max_agent_turns.get("searcher")
+    searcher_factory = lambda: _create_agent(SearcherAgent, _searcher_cfg, _searcher_tools, max_steps=_searcher_steps)
     analyst = _create_agent(AnalystAgent, agent_configs.get("analyst", default_cfg), tools.get("analyst", _terminate), max_steps=max_agent_turns.get("analyst"))
     synthesizer = _create_agent(SynthesizerAgent, agent_configs.get("synthesizer", default_cfg), tools.get("synthesizer", _terminate), max_steps=max_agent_turns.get("synthesizer"))
     writer = _create_agent(WriterAgent, agent_configs.get("writer", default_cfg), tools.get("writer", _terminate), max_steps=max_agent_turns.get("writer"))
@@ -111,7 +117,7 @@ def build_workflow(
     t_cr = agent_timeouts.get("critic", 300)
 
     async def _planner_node(s): return await planner_node(s, planner, progress=progress, timeout=t_pl)
-    async def _searcher_node(s): return await searcher_node(s, searcher, progress=progress, timeout=t_se)
+    async def _searcher_node(s): return await searcher_node(s, searcher_factory, progress=progress, timeout=t_se, max_parallel=max_parallel_searches)
     async def _analyst_node(s): return await analyst_node(s, analyst, progress=progress, timeout=t_an)
     async def _synthesizer_node(s): return await synthesizer_node(s, synthesizer, progress=progress, timeout=t_sy)
     async def _writer_node(s): return await writer_node(s, writer, progress=progress, timeout=t_wr)

@@ -26,6 +26,10 @@ max_search_results_per_source: 5
 # Max queries per search round
 max_search_queries: 2
 
+# Max parallel searches (each query runs in its own agent instance)
+# Set to 1 for sequential, higher values for parallel (respect API rate limits)
+max_parallel_searches: 3
+
 # Max agent turns (ReAct loop iterations) per task
 max_agent_turns:
   planner: 2

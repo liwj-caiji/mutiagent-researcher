@@ -158,6 +158,7 @@ async def run_research(topic: str, agents_config_path: str, research_config_path
         max_agent_turns=max_agent_turns,
         progress=tracker,
         agent_timeouts=agent_timeouts,
+        max_parallel_searches=research_cfg.get("max_parallel_searches", 3),
     )
 
     initial_state: ResearchState = {
