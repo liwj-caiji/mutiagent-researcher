@@ -1,7 +1,7 @@
 # Research workflow configuration
 
 # Maximum number of research iterations (plan → search → ... → critic)
-max_rounds: 1
+max_rounds: 2
 
 # Quality thresholds for each round (must be met to skip re-planning)
 quality_thresholds:
@@ -14,9 +14,11 @@ quality_threshold: 50
 
 # Search sources — what to search in parallel
 search_sources:
-  - web
-  - arxiv
-  - wikipedia
+  - brave          # Brave Search (real web, 2000/mo free)
+  - tavily         # Tavily (AI-optimized, 1000/mo free)
+  - duckduckgo     # DuckDuckGo Instant Answers (no key)
+  - arxiv          # arXiv academic papers (no key)
+  - wikipedia      # Wikipedia encyclopedia (no key)
 
 # Max search results per source
 max_search_results_per_source: 5
@@ -61,13 +63,11 @@ mcp:
   servers:
     search:
       command: uv
-      args: ["run", "python", "-m", "src.tools.search.mcp_server"]
-    analysis:
-      command: uv
-      args: ["run", "python", "-m", "src.tools.analysis.mcp_server"]
-    export:
-      command: uv
-      args: ["run", "python", "-m", "src.tools.export.mcp_server"]
+      args: ["run", "python", "-m", "src.tools.mcp_server"]
+    # To add external MCP tools, add entries here, e.g.:
+    # github:
+    #   command: npx
+    #   args: ["-y", "@anthropic/mcp-server-github"]
 
 # Enable checkpointer for crash recovery
 use_checkpointer: false
