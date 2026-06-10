@@ -477,13 +477,46 @@ Agent 执行结果从 `agent.messages` 中最后一条 assistant 回复提取。
 | 节点 | 请求内容 | 超时 | 特殊行为 |
 |------|---------|------|---------|
 | `planner_node` | 轮次 1: topic + "create plan"。后续轮次: topic + gaps + "focus on gaps" | 300s | 调用 `planner.parse_plan()` 提取 JSON |
-| `searcher_node` | 逐 query 执行（最多 10 个），每个 query 独立 agent run | 600s | 串行搜索，每次重置 agent 上下文 |
+| `searcher_node` | 逐 query 执行（最多 10 个），每个 query 独立 agent 实例 | 600s | **并行搜索**（asyncio.gather + Semaphore），每个查询创建独立 SearcherAgent，通过 `max_parallel_searches` 控制并发数 |
 | `analyst_node` | 所有搜索结果拼接（截断 30k chars）+ analysis 指令 | 600s | — |
 | `synthesizer_node` | outline (JSON) + 所有分析（截断 30k chars）+ synthesize 指令 | 600s | — |
 | `writer_node` | outline + synthesized findings（截断 20k chars）+ writing 指令 | 900s | — |
 | `critic_node` | draft report（截断 20k chars）+ review 指令 | 300s | 调用 `critic.parse_review()` 提取评分 |
 
-**Searcher 特殊处理**：与其它 Agent 不同，Searcher 对每个 query 串行执行一次完整的 agent run（含重置），确保每个搜索有干净的上下文。整体超时 600s 覆盖全部搜索。
+**Searcher 并行搜索**：Searcher 是唯一需要并行化的节点（多个搜索查询彼此独立）。实现采用 `asyncio.gather` + `asyncio.Semaphore` 方案：
+
+```python
+# searcher_node 核心逻辑
+semaphore = asyncio.Semaphore(max_parallel)
+
+async def _search_one(query, index):
+    async with semaphore:
+        agent = searcher_factory()      # 每个查询独立 agent 实例
+        await agent.run(query_request)
+        return extract_result(agent)
+
+tasks = [_search_one(q, i) for q in queries]
+results = await asyncio.gather(*tasks, return_exceptions=True)
+```
+
+**设计要点**：
+- **工厂函数**：`searcher_factory()` 每次调用创建新的 `SearcherAgent` 实例，各查询状态完全隔离
+- **Semaphore 限流**：`max_parallel_searches`（默认 3）控制最大并发，防止 API rate limit
+- **查询级容错**：`return_exceptions=True`，单个查询超时/异常不崩溃，其他查询正常完成
+- **超时分配**：每个查询超时 = `timeout / max_parallel`，总量不超过总超时
+- **结果合并**：`search_results` 使用 `operator.add` reducer，框架自动累加所有查询结果
+
+**为什么用 asyncio.gather 而不是 LangGraph Send API**：
+
+| 维度 | asyncio.gather（当前方案） | LangGraph Send API |
+|------|---------------------------|--------------------|
+| 图拓扑改动 | 无，图结构不变 | 需增加 `search_single` 节点 + `aggregate` 合并节点 + 条件路由改为 Send |
+| agent 管理 | 工厂函数按需创建实例 | 每个 Send 执行也需创建独立 agent 实例 |
+| 状态管理 | `operator.add` reducer 自动累加 | 每个 `search_single` 返回 dict，reducer 合并（机制相同） |
+| 调试 | 单节点内断点即可 | 多节点跳转，追踪链路更长 |
+| 适用场景 | 简单 fan-out（所有 query 用同一工具集） | 异构 fan-out（不同节点不同逻辑） |
+
+Send API 的优势在于**异构并行**（不同节点不同 Agent 类型各自执行），而本项目 Searcher 的查询是同质的（同一套工具/同一 Agent 类型），用 `asyncio.gather` 更简洁。如果未来需要 Planner 同时向 Searcher 和外部 API 分发任务，Send API 是天然选择。
 
 ### 9.3 工作流构建（`src/graph/workflow.py`）
 
@@ -674,7 +707,7 @@ if config.provider == "new_provider":
 
 ## 15. 已知限制
 
-- Searcher 当前串行执行多 query（LangGraph Send API 并行调用预留但未实现）
+- Searcher 已实现 asyncio.gather 并行搜索（2026-06），但仅限同质查询并行，异构分发待 Send API
 - 报告仅支持 Markdown 格式（PDF/Word/HTML 待扩展）
 - 无 Token 计数和成本统计
 - 长期记忆未深度集成到工作流中
