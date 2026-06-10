@@ -8,10 +8,10 @@ from src.agents.specialized import (
     SynthesizerAgent,
     WriterAgent,
 )
-from src.agents.llm_adapter import LLMAdapter
+from src.agents.llm_adapter import LLMProvider
 
 __all__ = [
-    "LLMAdapter",
+    "LLMProvider",
     "PlannerAgent",
     "SearcherAgent",
     "AnalystAgent",

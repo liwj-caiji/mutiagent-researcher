@@ -10,7 +10,7 @@ The workflow follows a Supervisor pattern:
                                 Formatter → END
 
 All agents inherit from OpenManus ToolCallAgent (Pydantic BaseModel).
-Each agent gets an LLMAdapter that bridges to LangChain multi-provider LLMs.
+Each agent gets an LLMProvider that bridges OpenManus to native provider SDKs.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from src.agents.specialized import (
     SynthesizerAgent,
     WriterAgent,
 )
-from src.agents.llm_adapter import LLMAdapter
+from src.agents.llm_adapter import LLMProvider
 from src.graph.nodes import (
     analyst_node,
     critic_node,
@@ -50,15 +50,15 @@ logger = logging.getLogger(__name__)
 
 
 def _create_agent(agent_cls, llm_config: AgentLLMConfig, tools: ToolCollection, max_steps: int | None = None):
-    """Create an OpenManus agent with LLMAdapter.
+    """Create an OpenManus agent with LLMProvider.
 
     OpenManus's BaseAgent.model_validator replaces the llm field with an app.llm.LLM
     instance if it's not already one. We bypass this by setting llm via __dict__
     after Pydantic initialization.
     """
     agent = agent_cls(available_tools=tools)
-    adapter = LLMAdapter(llm_config)
-    agent.__dict__["llm"] = adapter
+    provider = LLMProvider(llm_config)
+    agent.__dict__["llm"] = provider
     if max_steps is not None:
         agent.max_steps = max_steps
     return agent

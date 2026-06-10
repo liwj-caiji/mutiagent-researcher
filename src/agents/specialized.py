@@ -21,7 +21,7 @@ from pydantic import Field
 
 from src._framework import Message, Terminate, ToolCallAgent, ToolCollection
 
-from src.agents.llm_adapter import LLMAdapter
+from src.agents.llm_adapter import LLMProvider
 
 
 # ── System prompts ──────────────────────────────────────────────────────────
