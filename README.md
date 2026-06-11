@@ -77,9 +77,19 @@ planner:
 ### 4. 运行
 
 ```bash
+# 基础用法
 uv run python -m src.main "人工智能对教育的影响"
+
+# 指定配置文件 + 详细日志（打印每个 Agent 的 ReAct 步骤和工具调用）
 uv run python -m src.main "Research topic" --config config/research.yaml -v
 ```
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `topic`（位置参数） | 研究主题，中文或英文 | 必填 |
+| `--config` / `-c` | 研究流程配置文件路径 | `config/research.yaml` |
+| `--agents` / `-a` | Agent LLM 配置文件路径 | `config/agents.yaml` |
+| `--verbose` / `-v` | 启用详细日志（显示 agent 内部 ReAct 循环细节） | 关闭 |
 
 ## Agent 角色
 
