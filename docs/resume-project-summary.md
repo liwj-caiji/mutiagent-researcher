@@ -18,7 +18,6 @@
 | 工具协议 | MCP (Model Context Protocol) | 双模式工具架构（进程内 / stdio 子进程） |
 | 搜索 | Brave, Tavily, DuckDuckGo, arXiv, Wikipedia, Jina | 多源并行搜索（asyncio.gather + Semaphore） |
 | 进度显示 | Rich (Live + Table) | 6 Agent 实时状态展示 |
-| 记忆 | ChromaDB | 长期向量记忆（可选） |
 | CLI | Typer + Loguru | 命令行入口 + 结构化日志 |
 
 ---

@@ -104,9 +104,6 @@
 │  schema.py                Message / Memory 等    │  数据结构
 │  terminate.py             Terminate              │  终止工具
 ├──────────────────────────────────────────────────┤
-│  src/memory/              记忆系统               │
-│  long_term.py             ChromaDB 长期记忆       │
-├──────────────────────────────────────────────────┤
 │  src/utils/               工具                   │
 │  progress.py              ProgressTracker        │  Rich 实时进度显示
 └──────────────────────────────────────────────────┘
@@ -578,20 +575,6 @@ Send API 的优势在于**异构并行**（不同节点不同 Agent 类型各自
 - Token 估算：`len(content) // 4`
 - 每个 Agent 独立记忆，每轮 run 前通过 `_reset_agent()` 清空
 
-### 10.2 长期记忆
-
-`src/memory/long_term.py` — ChromaDB 持久化向量存储：
-
-| 特性 | 实现 |
-|------|------|
-| 存储后端 | ChromaDB PersistentClient，余弦相似度 |
-| 分块策略 | 按句子边界分割（`. `），每块 ~2000 字符 |
-| Entry ID | `MD5(topic + timestamp)` |
-| 写入 | `add(topic, content, metadata)` — 自动分块 + 元数据 |
-| 检索 | `query(topic, n_results)` — 语义搜索，返回 content + metadata + distance |
-| 删除 | `delete_topic(topic)` — 按 topic 过滤删除 |
-
-通过 `config/research.yaml` 中的 `use_long_term_memory: true` 启用。
 
 ---
 
@@ -648,7 +631,7 @@ uv run python -m src.main "研究主题" --config config/research.yaml --agents 
 | `mcp.enabled` | MCP 模式开关 | true |
 | `mcp.servers` | MCP Server 配置 | — |
 | `use_checkpointer` | SQLite 状态持久化 | false |
-| `use_long_term_memory` | ChromaDB 长期记忆 | false |
+
 
 ---
 
@@ -727,7 +710,7 @@ if config.provider == "new_provider":
 - Searcher 已实现 asyncio.gather 并行搜索（2026-06），但仅限同质查询并行，异构分发待 Send API
 - 报告仅支持 Markdown 格式（PDF/Word/HTML 待扩展）
 - 无 Token 计数和成本统计
-- 长期记忆未深度集成到工作流中
+
 - 引用提取依赖 LLM 自行解析，未做结构化处理
 - `PythonExecuteTool` 无 Docker 隔离，不适用于执行不可信代码
 - `WebScraperTool` 不执行 JavaScript，对动态渲染页面无效
@@ -770,8 +753,6 @@ muti_agent/
 │   │       └── manager.py   # MCPManager
 │   ├── llm/
 │   │   └── config.py        # AgentLLMConfig
-│   ├── memory/
-│   │   └── long_term.py     # ChromaDB 长期记忆
 │   ├── utils/
 │   │   └── progress.py      # Rich 实时进度显示
 │   └── main.py              # CLI 入口 (typer)
