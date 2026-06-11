@@ -221,14 +221,16 @@ ToolCallAgent.act()
 - **Writer**: 要求 Markdown 格式、执行摘要、章节内容、文中引用 [1] [2]、参考文献
 - **Critic**: 要求输出 6 维度 JSON 评分（0-100），通过 `parse_review()` 解析
 
-### 5.4 CriticAgent.parse_review() 的三层 JSON 提取
+### 5.4 CriticAgent.parse_review() 的 JSON 提取
 
-由于 LLM 输出的 JSON 格式多变，`parse_review()` 使用三层降级策略：
+由于 LLM 输出的 JSON 格式多变（且 `scores` 内部对象导致花括号嵌套），`parse_review()` 使用多层降级策略：
 
 1. **Tier 1**: 尝试从 markdown code fence（```json ... ```）中提取
-2. **Tier 2**: 搜索包含 `"overall_score"` 键的裸 JSON 对象
+2. **Tier 2**: 搜索 `"overall_score"` 的字符串位置，向前找 `{`，用花括号深度计数找到匹配的 `}`，提取完整 JSON 对象（处理了嵌套花括号）
 3. **Tier 3**: 用简单正则匹配 `overall_score: <数字>` 或 `"overall_score": <数字>`
 4. **兜底**: 返回 `overall_score: 0, recommendation: "revise"`
+
+> **为什么 Tier 2 需要深度计数**：Critic 的 JSON 输出包含嵌套的 `scores` 对象（6 个维度的键值对），简单的 `\{[^{}]*\}` 正则会在第一个内部 `}` 处截断，无法匹配完整 JSON。花括号深度计数从 `overall_score` 向外查找匹配的大括号对，正确提取嵌套结构。
 
 ---
 
@@ -453,6 +455,7 @@ uv run python -m src.tools.mcp_server
 | Writer 输出 | `draft_report`, `final_report`, `citations` | str / str / list[dict] |
 | Critic 输出 | `quality_score`, `critique`, `gaps` | float / dict / list[str] |
 | 流程控制 | `current_phase`, `research_round`, `max_rounds`, `quality_threshold`, `overall_score` | — |
+| HITL | `human_decision`, `review_path` | str / str |
 | 消息 | `messages` | Annotated[list, add_messages] |
 
 `operator.add` reducer 用于 `search_results` 和 `analyses`，支持并行节点结果自动追加合并。
@@ -481,7 +484,8 @@ Agent 执行结果从 `agent.messages` 中最后一条 assistant 回复提取。
 | `analyst_node` | 所有搜索结果拼接（截断 30k chars）+ analysis 指令 | 600s | — |
 | `synthesizer_node` | outline (JSON) + 所有分析（截断 30k chars）+ synthesize 指令 | 600s | — |
 | `writer_node` | outline + synthesized findings（截断 20k chars）+ writing 指令 | 900s | — |
-| `critic_node` | draft report（截断 20k chars）+ review 指令 | 300s | 调用 `critic.parse_review()` 提取评分 |
+| `critic_node` | draft report（截断 20k chars）+ review 指令 | 300s | 调用 `critic.parse_review()` 提取评分；从后向前搜索 agent 消息，取第一条实质性内容（>50 字符），避免取到 Terminate 工具调用的空消息；请求中包含强指令要求先输出 JSON 再调 Terminate |
+| `human_review_node` | 保存草稿到文件，通过 `interrupt()` 暂停 | — | HITL 启用时插入 critic 和 formatter 之间；用户可 approve / revise / abort |
 
 **Searcher 并行搜索**：Searcher 是唯一需要并行化的节点（多个搜索查询彼此独立）。实现采用 `asyncio.gather` + `asyncio.Semaphore` 方案：
 
@@ -549,7 +553,18 @@ Send API 的优势在于**异构并行**（不同节点不同 Agent 类型各自
 
 4. **Formatter** `_formatter_node()`：为 draft report 添加标题头（时间戳、轮次、质量分数），输出 `final_report`。
 
-5. **Checkpointer**（可选）：`use_checkpointer=True` 时使用 SQLite 持久化状态，支持崩溃恢复。
+5. **HITL 路由**：当 `human_in_the_loop: true` 时，Critic 后插入 `human_review_node`：
+   ```
+   ... → critic → human_review → [interrupt] → _hitl_router
+                                            ├── approve → formatter → END
+                                            ├── revise  → planner（若 round <= max_rounds）
+                                            └── abort   → formatter → END
+   ```
+   `human_review_node` 将草稿保存到 `review_dir`，调用 LangGraph `interrupt()` 暂停执行。`main.py` 通过 `console.input()` 获取用户决策，`Command(resume=...)` 恢复执行。`ProgressTracker.pause()/resume()` 在输入期间暂停 Rich Live 显示，避免输入被刷新覆盖。
+
+6. **Checkpointer**：HITL 启用时自动创建 SQLite checkpointer（`AsyncSqliteSaver`），LangGraph `interrupt()` 依赖 checkpoint 机制保存暂停点。
+
+7. **_NodeDebugSaver**：当 `debug_dir` 配置时，包装每个节点函数。每次节点返回后将其输出 dict 序列化为 JSON 文件（`debug/<时间戳>_<主题>/<序号>_<节点名>.json`），包含 node、step、timestamp、topic、research_round、output 字段。用于质量评估和问题诊断。
 
 ---
 
@@ -588,7 +603,9 @@ Send API 的优势在于**异构并行**（不同节点不同 Agent 类型各自
 - **显示列**: Agent, Status, Steps (current/max), Elapsed, Detail
 - **刷新率**: 4 Hz
 - **使用模式**: Context manager (`with tracker:`)，进入时启动 Live，退出时渲染最终汇总表
-- **API**: `agent_started()`, `agent_step_update()`, `agent_finished()`, `agent_timeout()`, `agent_error()`
+- **API**: `agent_started()`, `agent_step_update()`, `agent_finished()`, `agent_timeout()`, `agent_error()`, `pause()`, `resume()`
+
+`pause()/resume()` 用于 HITL 场景：用户输入时暂停 Live 刷新，避免 Rich 的刷新覆盖输入行。输入完成后恢复。
 
 ---
 
@@ -611,7 +628,7 @@ uv run python -m src.main "研究主题" --config config/research.yaml --agents 
 6. 构建 `initial_state`（从配置读取 topic, language, max_rounds 等）
 7. `workflow.ainvoke(initial_state)` — 执行流水线
 8. 保存报告到 `output_dir`，文件名自动生成（topic + 时间戳）
-9. 终端显示报告预览（前 1000 字符）
+9. 终端打印报告文件路径（不再输出完整预览，避免大报告截断终端）
 
 ### 配置文件
 
@@ -773,6 +790,24 @@ muti_agent/
 ---
 
 ## 附录 A: 变更记录
+
+### [0.6.0] — 2026-06-11
+
+**Added**
+- Human-in-the-Loop (HITL)：基于 LangGraph `interrupt()` 的人工审核机制，Critic 后暂停，用户可 approve / revise / abort
+- `_NodeDebugSaver`：每个节点输出保存到 `debug/` 目录，用于质量评估和问题诊断
+- `ProgressTracker.pause()/resume()`：HITL 输入期间暂停 Rich Live 刷新
+
+**Fixed**
+- `quality_score` 恒为 0 的 bug：根因是 critic `max_steps=1` 导致 LLM 直接调 Terminate 而不产出评审内容
+- `parse_review()` JSON 提取：Tier 2 从简单正则改为花括号深度计数，处理嵌套 `scores` 对象
+- Critic 节点消息选择：从「取最后一条」改为从后向前搜索实质性内容（>50 字符），避免取到 Terminate 空消息
+- Critic 请求增加强指令：要求 LLM 先输出 JSON 再调 Terminate
+
+**Changed**
+- `max_agent_turns` 优化：analyst 2→3, synthesizer 2→3, writer 2→5, critic 1→3
+- 终端报告预览移除：HITL approve 后仅显示文件路径，避免大报告截断
+- `reviews/` 和 `erro.md` 加入 `.gitignore`
 
 ### [0.5.0] — 2026-06-08
 
