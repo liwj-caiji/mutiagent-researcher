@@ -50,6 +50,10 @@ agent_timeouts:
 
 # Output settings
 output_dir: ./reports
+
+# Debug — if set, each node's output dict is saved to this directory
+# for post-run quality assessment. Leave empty/null to disable.
+debug_dir: ./debug
 output_formats:
   - markdown
 
@@ -73,6 +77,14 @@ mcp:
     #   command: npx
     #   args: ["-y", "@anthropic/mcp-server-github"]
 
-# Enable checkpointer for crash recovery
+# Human-in-the-loop — pause after each Critic review for human approval
+# When enabled, LangGraph interrupt() pauses execution. User reviews the
+# full draft report (saved to review_dir) and decides: approve / revise / abort.
+# Requires checkpointing (auto-enabled when HITL is on).
+human_in_the_loop:
+  enabled: true
+  review_dir: ./reviews
+
+# Enable checkpointer for crash recovery (auto-enabled when HITL is on)
 use_checkpointer: false
 checkpointer_path: ./data/checkpoints.sqlite

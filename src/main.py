@@ -182,6 +182,8 @@ async def run_research(topic: str, agents_config_path: str, research_config_path
         human_in_the_loop=hitl_enabled,
         review_dir=hitl_review_dir,
         checkpointer=checkpointer,
+        debug_dir=research_cfg.get("debug_dir"),
+        topic=topic,
     )
 
     initial_state: ResearchState = {

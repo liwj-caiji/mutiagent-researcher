@@ -15,8 +15,10 @@ Each agent gets an LLMProvider that bridges OpenManus to native provider SDKs.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable, Literal
 
 from langgraph.graph import END, StateGraph
 
@@ -49,6 +51,45 @@ if TYPE_CHECKING:
 from loguru import logger
 
 
+class _NodeDebugSaver:
+    """Saves each node's output dict to disk for post-run quality assessment."""
+
+    def __init__(self, debug_dir: str, topic: str):
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        safe_topic = "".join(c if c.isalnum() else "_" for c in topic)[:30]
+        self.run_dir = Path(debug_dir) / f"{ts}_{safe_topic}"
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self._step = 0
+        logger.info(f"Debug output will be saved to: {self.run_dir.resolve()}")
+
+    def wrap(self, name: str, node_fn: Callable) -> Callable:
+        """Wrap a node function to save its output dict after execution."""
+        sav = self
+
+        async def _wrapped(state: dict) -> dict:
+            result = await node_fn(state)
+            sav._step += 1
+            step_str = f"{sav._step:02d}_{name}"
+            out_path = sav.run_dir / f"{step_str}.json"
+            try:
+                # Save output dict + key state context fields
+                payload = {
+                    "node": name,
+                    "step": sav._step,
+                    "timestamp": datetime.now().isoformat(),
+                    "topic": state.get("topic", ""),
+                    "research_round": state.get("research_round", 0),
+                    "output": result,
+                }
+                out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+                logger.debug(f"Saved node output: {out_path.name}")
+            except Exception as e:
+                logger.warning(f"Failed to save debug output for {name}: {e}")
+            return result
+
+        return _wrapped
+
+
 def _create_agent(agent_cls, llm_config: AgentLLMConfig, tools: ToolCollection, max_steps: int | None = None):
     """Create an OpenManus agent with LLMProvider.
 
@@ -74,6 +115,8 @@ def build_workflow(
     human_in_the_loop: bool = False,
     review_dir: str = "./reviews",
     checkpointer=None,
+    debug_dir: str | None = None,
+    topic: str = "",
 ) -> StateGraph:
     """Build and compile the research workflow StateGraph.
 
@@ -89,6 +132,9 @@ def build_workflow(
         checkpointer: Optional LangGraph checkpointer (AsyncSqliteSaver, MemorySaver, etc.).
             Required for HITL. The caller (main.py) creates it via
             aiosqlite.connect + AsyncSqliteSaver and passes it here.
+        debug_dir: If set, each node's output dict is saved to this directory
+            under a timestamped run subfolder.
+        topic: Research topic (used in debug output folder name).
 
     Returns:
         A compiled LangGraph StateGraph.
@@ -126,6 +172,36 @@ def build_workflow(
     async def _synthesizer_node(s): return await synthesizer_node(s, synthesizer, progress=progress, timeout=t_sy)
     async def _writer_node(s): return await writer_node(s, writer, progress=progress, timeout=t_wr)
     async def _critic_node(s): return await critic_node(s, critic, progress=progress, timeout=t_cr)
+
+    async def _formatter_node(s: ResearchState) -> dict:
+        draft = s.get("draft_report", "")
+        topic = s["topic"]
+        quality = s.get("quality_score", 0)
+        round_num = s.get("research_round", 1)
+
+        header = (
+            f"# {topic}\n\n"
+            f"> Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"> Research rounds: {round_num}\n"
+            f"> Quality score: {quality:.0f}/100\n\n"
+            "---\n\n"
+        )
+
+        return {
+            "final_report": header + draft,
+            "current_phase": "formatted",
+        }
+
+    # ── Debug: wrap nodes to save output if debug_dir is set ──────────────
+    saver = _NodeDebugSaver(debug_dir, topic) if debug_dir else None
+    if saver:
+        _planner_node = saver.wrap("planner", _planner_node)
+        _searcher_node = saver.wrap("searcher", _searcher_node)
+        _analyst_node = saver.wrap("analyst", _analyst_node)
+        _synthesizer_node = saver.wrap("synthesizer", _synthesizer_node)
+        _writer_node = saver.wrap("writer", _writer_node)
+        _critic_node = saver.wrap("critic", _critic_node)
+        _formatter_node = saver.wrap("formatter", _formatter_node)
 
     workflow.add_node("planner", _planner_node)
     workflow.add_node("searcher", _searcher_node)
@@ -212,21 +288,3 @@ def _supervisor_router(state: ResearchState) -> Literal["planner", "formatter", 
     return "planner"
 
 
-async def _formatter_node(state: ResearchState) -> dict:
-    draft = state.get("draft_report", "")
-    topic = state["topic"]
-    quality = state.get("quality_score", 0)
-    round_num = state.get("research_round", 1)
-
-    header = (
-        f"# {topic}\n\n"
-        f"> Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"> Research rounds: {round_num}\n"
-        f"> Quality score: {quality:.0f}/100\n\n"
-        "---\n\n"
-    )
-
-    return {
-        "final_report": header + draft,
-        "current_phase": "formatted",
-    }
