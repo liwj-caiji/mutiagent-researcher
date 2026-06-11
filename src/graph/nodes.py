@@ -25,7 +25,6 @@ from src.graph.state import ResearchState
 
 if TYPE_CHECKING:
     from src.utils.progress import ProgressTracker
-    from src.memory.long_term import LongTermMemory
 
 def _reset_agent(agent) -> None:
     """Reset an OpenManus agent to IDLE, ready for a new run."""
@@ -100,7 +99,6 @@ async def planner_node(
     planner: PlannerAgent,
     progress: ProgressTracker | None = None,
     timeout: float = 300,
-    long_term_memory: "LongTermMemory | None" = None,
 ) -> dict:
     """Plan the research: decompose topic into outline and search queries."""
     round_num = state.get("research_round", 1)
@@ -109,32 +107,9 @@ async def planner_node(
     topic = state["topic"]
     gaps = state.get("gaps", [])
 
-    # ── Query long-term memory for related past research ──
-    past_context = ""
-    if long_term_memory is not None and round_num == 1:
-        try:
-            past_findings = long_term_memory.query(topic, n_results=5)
-            if past_findings:
-                past_context = "### Related Past Research Findings\n"
-                past_context += "The following findings from previous research may be relevant:\n"
-                for i, pf in enumerate(past_findings, 1):
-                    meta = pf.get("metadata", {})
-                    past_topic = meta.get("topic", "Unknown")
-                    past_score = meta.get("quality_score", "N/A")
-                    past_content = pf.get("content", "")[:600]
-                    past_context += (
-                        f"\n**Past Finding {i}** "
-                        f"(topic: {past_topic}, quality: {past_score})\n"
-                        f"{past_content}\n"
-                    )
-                past_context += "\n---\n\n"
-        except Exception as e:
-            logger.warning(f"[Planner] Long-term memory query failed: {e}")
-
     if round_num == 1:
         request = (
             f"Research topic: {topic}\n\n"
-            f"{past_context}"
             "Create a comprehensive research plan. Break down this topic into sub-topics, "
             "generate specific search queries, and create a structured outline for the final report."
         )

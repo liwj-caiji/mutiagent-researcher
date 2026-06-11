@@ -142,18 +142,6 @@ async def run_research(topic: str, agents_config_path: str, research_config_path
     agents_cfg = load_yaml(agents_config_path)
     research_cfg = load_yaml(research_config_path)
 
-    # ── Long-term memory (ChromaDB vector store) ──
-    use_long_term = research_cfg.get("use_long_term_memory", False)
-    memory_persist_dir = research_cfg.get("memory_persist_dir", "./data/chroma")
-    long_term_memory = None
-    if use_long_term:
-        from src.memory.long_term import LongTermMemory
-        try:
-            long_term_memory = LongTermMemory(persist_dir=memory_persist_dir)
-            console.print(f"[dim]Long-term memory enabled (ChromaDB at {memory_persist_dir})[/dim]")
-        except Exception as e:
-            console.print(f"[yellow]Long-term memory init failed, continuing without it: {e}[/yellow]")
-
     agent_configs = build_agent_configs(agents_cfg)
     tool_collections, mcp_manager = await build_tool_collections(research_cfg)
 
@@ -196,7 +184,6 @@ async def run_research(topic: str, agents_config_path: str, research_config_path
         checkpointer=checkpointer,
         debug_dir=research_cfg.get("debug_dir"),
         topic=topic,
-        long_term_memory=long_term_memory,
     )
 
     initial_state: ResearchState = {
@@ -267,25 +254,6 @@ async def run_research(topic: str, agents_config_path: str, research_config_path
                     # Resume workflow
                     final_state = await workflow.ainvoke(Command(resume=decision), config)
                     gs = await workflow.aget_state(config)
-
-            # Store findings in long-term memory for cross-run knowledge reuse
-            if long_term_memory is not None:
-                try:
-                    topic_str = str(final_state.get("topic", topic))
-                    findings = final_state.get("synthesized_findings", "") or ""
-                    quality = final_state.get("quality_score", 0)
-                    if findings.strip():
-                        long_term_memory.add(
-                            topic=topic_str,
-                            content=findings,
-                            metadata={
-                                "quality_score": quality,
-                                "rounds": final_state.get("research_round", 1),
-                            },
-                        )
-                        console.print("[dim]Research findings stored in long-term memory.[/dim]")
-                except Exception as e:
-                    console.print(f"[yellow]Failed to store in long-term memory: {e}[/yellow]")
 
         except Exception as e:
             logger.exception("Research pipeline failed")
