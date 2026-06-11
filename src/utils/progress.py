@@ -144,10 +144,10 @@ class ProgressTracker:
 
     def _render(self, final: bool = False) -> Table:
         table = Table(
-            title="[bold]Multi-Agent Research Pipeline[/bold]",
+            title="[bold]Multi-Agent Research Pipeline[/bold]" if final else None,
             title_justify="left",
             expand=True,
-            show_header=True,
+            show_header=final,
             header_style="bold dim",
         )
         table.add_column("Agent", style="cyan", width=14, no_wrap=True)
@@ -179,20 +179,18 @@ class ProgressTracker:
             elif a.status in ("error", "timeout"):
                 error_count += 1
 
-        # Summary footer
-        total_elapsed = time.monotonic() - self._pipeline_start
+        # Summary footer (only in final render)
         if final:
+            total_elapsed = time.monotonic() - self._pipeline_start
             summary = f"[bold]Pipeline complete[/bold] — {finished_count}/{total} agents finished"
-        else:
-            summary = f"{finished_count}/{total} completed"
-        if error_count:
-            summary += f", {error_count} failed"
-        summary += f" | [dim]{total_elapsed:.0f}s elapsed[/dim]"
+            if error_count:
+                summary += f", {error_count} failed"
+            summary += f" | [dim]{total_elapsed:.0f}s elapsed[/dim]"
 
-        table.add_section()
-        table.add_row(
-            Text(summary, style="bold" if final else ""),
-            "", "", "", "",
-        )
+            table.add_section()
+            table.add_row(
+                Text(summary, style="bold"),
+                "", "", "", "",
+            )
 
         return table
