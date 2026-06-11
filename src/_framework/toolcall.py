@@ -74,7 +74,8 @@ class ToolCallAgent(ReActAgent):
         )
         content = response.content if response and response.content else ""
 
-        logger.info(f"✨ {self.name}'s thoughts: {content}")
+        detail = content[:200] + ("..." if len(content) > 200 else "")
+        logger.info(f"✨ {self.name}'s thoughts: {detail}")
         logger.info(
             f"🛠️ {self.name} selected {len(tool_calls) if tool_calls else 0} tools to use"
         )
@@ -134,8 +135,9 @@ class ToolCallAgent(ReActAgent):
             if self.max_observe:
                 result = result[: self.max_observe]
 
+            short_result = result[:150] + ("..." if len(result) > 150 else "")
             logger.info(
-                f"🎯 Tool '{command.function.name}' completed its mission! Result: {result}"
+                f"🎯 Tool '{command.function.name}' completed its mission! Result: {short_result}"
             )
 
             tool_msg = Message.tool_message(

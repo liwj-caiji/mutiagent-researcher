@@ -15,7 +15,6 @@ Each agent gets an LLMProvider that bridges OpenManus to native provider SDKs.
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -35,6 +34,7 @@ from src.agents.llm_adapter import LLMProvider
 from src.graph.nodes import (
     analyst_node,
     critic_node,
+    human_review_node,
     planner_node,
     searcher_node,
     synthesizer_node,
@@ -46,7 +46,7 @@ from src.llm.config import AgentLLMConfig
 if TYPE_CHECKING:
     from src.utils.progress import ProgressTracker
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 def _create_agent(agent_cls, llm_config: AgentLLMConfig, tools: ToolCollection, max_steps: int | None = None):
@@ -67,24 +67,28 @@ def _create_agent(agent_cls, llm_config: AgentLLMConfig, tools: ToolCollection, 
 def build_workflow(
     agent_configs: dict[str, AgentLLMConfig],
     tools: dict[str, ToolCollection] | None = None,
-    use_checkpointer: bool = False,
-    checkpointer_path: str = "./data/checkpoints.sqlite",
     max_agent_turns: dict[str, int] | None = None,
     progress: ProgressTracker | None = None,
     agent_timeouts: dict[str, float] | None = None,
     max_parallel_searches: int = 3,
+    human_in_the_loop: bool = False,
+    review_dir: str = "./reviews",
+    checkpointer=None,
 ) -> StateGraph:
     """Build and compile the research workflow StateGraph.
 
     Args:
         agent_configs: Dict mapping agent name -> AgentLLMConfig.
         tools: Dict mapping agent name -> OpenManus ToolCollection.
-        use_checkpointer: Whether to use SQLite checkpointing.
-        checkpointer_path: Path to SQLite database.
         max_agent_turns: Per-agent max step overrides (from config).
         progress: Optional ProgressTracker for real-time display.
         agent_timeouts: Per-agent wall-clock timeout in seconds.
         max_parallel_searches: Max concurrent search queries (default 3).
+        human_in_the_loop: Enable human review after each Critic pass (requires checkpointer).
+        review_dir: Directory for draft reports shown to human reviewer.
+        checkpointer: Optional LangGraph checkpointer (AsyncSqliteSaver, MemorySaver, etc.).
+            Required for HITL. The caller (main.py) creates it via
+            aiosqlite.connect + AsyncSqliteSaver and passes it here.
 
     Returns:
         A compiled LangGraph StateGraph.
@@ -137,21 +141,61 @@ def build_workflow(
     workflow.add_edge("analyst", "synthesizer")
     workflow.add_edge("synthesizer", "writer")
     workflow.add_edge("writer", "critic")
-    workflow.add_conditional_edges(
-        "critic",
-        _supervisor_router,
-        {"planner": "planner", "formatter": "formatter", "end": END},
-    )
-    workflow.add_edge("formatter", END)
 
-    if use_checkpointer:
-        from langgraph.checkpoint.sqlite import SqliteSaver
-        import os
-        os.makedirs(os.path.dirname(checkpointer_path) or ".", exist_ok=True)
-        checkpointer = SqliteSaver.from_conn_string(checkpointer_path)
+    if human_in_the_loop:
+        # Graph: ... → critic → human_review → [interrupt] → _hitl_router
+        #   approve → formatter → END
+        #   revise  → planner (if rounds remain) | formatter (if max rounds)
+        #   abort   → formatter → END (save current draft)
+        async def _human_review_node(s): return await human_review_node(s, review_dir=review_dir)
+        workflow.add_node("human_review", _human_review_node)
+        workflow.add_edge("critic", "human_review")
+        workflow.add_conditional_edges(
+            "human_review",
+            _hitl_router,
+            {"planner": "planner", "formatter": "formatter", "end": END},
+        )
+        workflow.add_edge("formatter", END)
+    else:
+        # Original auto-routing: critic → _supervisor_router
+        workflow.add_conditional_edges(
+            "critic",
+            _supervisor_router,
+            {"planner": "planner", "formatter": "formatter", "end": END},
+        )
+        workflow.add_edge("formatter", END)
+
+    if checkpointer is not None:
         return workflow.compile(checkpointer=checkpointer)
 
     return workflow.compile()
+
+
+def _hitl_router(state: ResearchState) -> Literal["planner", "formatter", "end"]:
+    """Route based on human decision after review.
+
+    approve → formatter (finalize report)
+    revise  → planner (if rounds remain) | formatter (if max rounds exceeded)
+    abort   → formatter (save current draft as-is)
+    """
+    decision = state.get("human_decision", "abort")
+    current_round = state.get("research_round", 1)
+    max_rounds = state.get("max_rounds", 3)
+
+    if decision == "approve":
+        logger.info("[HITL] User approved → finalizing report")
+        return "formatter"
+
+    if decision == "revise":
+        if current_round > max_rounds:
+            logger.info(f"[HITL] User requested revise but max_rounds={max_rounds} → finalizing")
+            return "formatter"
+        logger.info("[HITL] User requested revision → re-planning with feedback")
+        return "planner"
+
+    # abort or unknown
+    logger.info("[HITL] User aborted → saving current draft")
+    return "formatter"
 
 
 def _supervisor_router(state: ResearchState) -> Literal["planner", "formatter", "end"]:

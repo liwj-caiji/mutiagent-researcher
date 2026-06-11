@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from typing import TYPE_CHECKING
+
+from loguru import logger
 
 from src._framework import AgentState as OM_AgentState
 
@@ -24,9 +25,6 @@ from src.graph.state import ResearchState
 
 if TYPE_CHECKING:
     from src.utils.progress import ProgressTracker
-
-logger = logging.getLogger(__name__)
-
 
 def _reset_agent(agent) -> None:
     """Reset an OpenManus agent to IDLE, ready for a new run."""
@@ -52,10 +50,10 @@ async def _run_agent_with_progress(
         progress.agent_started(agent_name, max_steps)
 
     async def _poll():
-        """Poll agent state every 500ms while run() executes."""
+        """Poll agent state every 1.5s while run() executes."""
         try:
             while True:
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1.5)
                 if progress is None:
                     continue
                 step = getattr(agent, "current_step", 0)
@@ -364,4 +362,97 @@ async def critic_node(
         "current_phase": "reviewed",
         "overall_score": overall,
         "research_round": current_round + 1,
+    }
+
+
+# ── Human Review Node ────────────────────────────────────────────────────────
+
+async def human_review_node(
+    state: ResearchState,
+    review_dir: str = "./reviews",
+) -> dict:
+    """Save the full draft report to file and pause for human review.
+
+    Uses LangGraph interrupt() to suspend execution. The caller (main.py)
+    presents the review prompt, gets user input, and resumes with Command(resume=...).
+
+    User decisions:
+        approve — proceed to formatter, output final report
+        revise  — return to planner with user feedback as new gaps
+        abort   — end the pipeline, save current draft as-is
+
+    The interrupt is only triggered when human_in_the_loop is enabled in config.
+    """
+    from datetime import datetime
+    from pathlib import Path
+
+    from langgraph.types import interrupt
+
+    draft = state.get("draft_report", "")
+    round_num = state.get("research_round", 1)
+    quality = state.get("quality_score", 0)
+    gaps = state.get("gaps", [])
+    topic = state.get("topic", "research")
+    critique = state.get("critique", {})
+
+    # Save full report to file for offline review
+    reviews_dir = Path(review_dir)
+    reviews_dir.mkdir(parents=True, exist_ok=True)
+    safe_topic = "".join(c if c.isalnum() or c in "-_" else "_" for c in topic)[:40]
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    review_path = reviews_dir / f"round-{round_num}-draft-{safe_topic}-{timestamp}.md"
+    review_path.write_text(draft, encoding="utf-8")
+
+    logger.info(f"[HumanReview] Round {round_num} draft saved to {review_path}, waiting for human...")
+
+    # Build critique summary for the terminal prompt
+    scores = critique.get("scores", {})
+    score_lines = "\n".join(f"  {k}: {v}/100" for k, v in scores.items()) if scores else "N/A"
+    strengths = critique.get("strengths", [])
+    weaknesses = critique.get("weaknesses", [])
+
+    # Pause execution — the caller sees this data and prompts the user
+    decision = interrupt({
+        "report_file": str(review_path),
+        "round": round_num,
+        "quality_score": quality,
+        "scores": score_lines,
+        "strengths": strengths[:3],
+        "weaknesses": weaknesses[:3],
+        "gaps": gaps,
+        "prompt": "输入决策: approve / revise: <反馈> / abort",
+    })
+
+    # Parse user decision (returned by Command(resume=...))
+    if isinstance(decision, str):
+        d = decision.strip().lower()
+        if d.startswith("approve"):
+            return {
+                "human_decision": "approve",
+                "review_path": str(review_path),
+                "current_phase": "awaiting_human",
+            }
+        elif d.startswith("revise"):
+            feedback = decision[6:].strip().lstrip(":").strip()
+            new_gaps = [feedback] if feedback else gaps
+            logger.info(f"[HumanReview] User requested revision: {feedback}")
+            return {
+                "human_decision": "revise",
+                "gaps": new_gaps,
+                "review_path": str(review_path),
+                "current_phase": "awaiting_human",
+            }
+        else:
+            logger.info("[HumanReview] User aborted")
+            return {
+                "human_decision": "abort",
+                "review_path": str(review_path),
+                "current_phase": "awaiting_human",
+            }
+
+    # Non-string input (e.g. dict from a WebUI) — treat as abort
+    return {
+        "human_decision": "abort",
+        "review_path": str(review_path),
+        "current_phase": "awaiting_human",
     }

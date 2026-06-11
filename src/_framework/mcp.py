@@ -1,4 +1,5 @@
 # Vendored from OpenManus (https://github.com/FoundationAgents/OpenManus) under MIT License.
+import os as _os
 from contextlib import AsyncExitStack
 from typing import Dict, List, Optional
 
@@ -7,6 +8,9 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.types import ListToolsResult, TextContent
+
+# Suppress MCP subprocess stderr by default (use DEVNULL to avoid terminal noise)
+_MCP_ERRLOG = open(_os.devnull, "w")
 
 from .tool_base import BaseTool, ToolResult
 from .tool_collection import ToolCollection
@@ -81,7 +85,7 @@ class MCPClients(ToolCollection):
 
         server_params = StdioServerParameters(command=command, args=args)
         stdio_transport = await exit_stack.enter_async_context(
-            stdio_client(server_params)
+            stdio_client(server_params, errlog=_MCP_ERRLOG)
         )
         read, write = stdio_transport
         session = await exit_stack.enter_async_context(ClientSession(read, write))

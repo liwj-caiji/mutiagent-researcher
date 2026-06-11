@@ -9,14 +9,17 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
+import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 
 import typer
 import yaml
 from dotenv import load_dotenv
+from langgraph.types import Command
+from loguru import logger
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -46,7 +49,6 @@ from src.tools.analysis import PythonExecuteTool
 
 app = typer.Typer(no_args_is_help=True)
 console = Console()
-logger = logging.getLogger(__name__)
 
 
 def load_yaml(path: str) -> dict:
@@ -146,19 +148,40 @@ async def run_research(topic: str, agents_config_path: str, research_config_path
     max_agent_turns: dict[str, int] = research_cfg.get("max_agent_turns", {})
     agent_timeouts: dict[str, float] = research_cfg.get("agent_timeouts", {})
 
+    hitl_cfg = research_cfg.get("human_in_the_loop", {})
+    hitl_enabled = bool(hitl_cfg.get("enabled", False))
+    hitl_review_dir = hitl_cfg.get("review_dir", "./reviews")
+    use_checkpointer = research_cfg.get("use_checkpointer", False)
+    checkpointer_path = research_cfg.get("checkpointer_path", "./data/checkpoints.sqlite")
+
     console.print(Panel(f"Building research workflow for: [bold]{topic}[/bold]", style="blue"))
+    if hitl_enabled:
+        console.print("[yellow]Human-in-the-loop enabled — you will review drafts before finalization.[/yellow]")
 
     tracker = ProgressTracker(console, max_agent_turns)
+
+    # Create async checkpointer if needed (HITL or crash recovery).
+    # AsyncSqliteSaver requires aiosqlite.Connection, created asynchronously.
+    checkpointer = None
+    _checkpointer_conn = None
+    if hitl_enabled or use_checkpointer:
+        import aiosqlite as _aiosqlite
+        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver as _AsyncSqliteSaver
+        import os as _os
+        _os.makedirs(_os.path.dirname(checkpointer_path) or ".", exist_ok=True)
+        _checkpointer_conn = await _aiosqlite.connect(checkpointer_path)
+        checkpointer = _AsyncSqliteSaver(_checkpointer_conn)
 
     workflow = build_workflow(
         agent_configs=agent_configs,
         tools=tool_collections,
-        use_checkpointer=research_cfg.get("use_checkpointer", False),
-        checkpointer_path=research_cfg.get("checkpointer_path", "./data/checkpoints.sqlite"),
         max_agent_turns=max_agent_turns,
         progress=tracker,
         agent_timeouts=agent_timeouts,
         max_parallel_searches=research_cfg.get("max_parallel_searches", 3),
+        human_in_the_loop=hitl_enabled,
+        review_dir=hitl_review_dir,
+        checkpointer=checkpointer,
     )
 
     initial_state: ResearchState = {
@@ -184,11 +207,45 @@ async def run_research(topic: str, agents_config_path: str, research_config_path
         "critique": {},
     }
 
+    # Config with thread_id for checkpointing (required by interrupt())
+    thread_id = str(uuid.uuid4())
+    config = {"configurable": {"thread_id": thread_id}}
+
     console.print("[bold green]Starting research pipeline...[/bold green]\n")
 
+    final_state: dict = {}
     with tracker:
         try:
-            final_state = await workflow.ainvoke(initial_state)
+            # First invocation — may stop at human_review interrupt
+            final_state = await workflow.ainvoke(initial_state, config)
+
+            # Handle HITL resume loop
+            if hitl_enabled:
+                gs = workflow.get_state(config)
+                while gs and gs.interrupts:
+                    interrupt_data = gs.interrupts[0].value
+
+                    # Show review summary
+                    console.print(Panel(
+                        f"[bold]Human Review Required[/bold]\n\n"
+                        f"Round: {interrupt_data.get('round', '?')}\n"
+                        f"Quality Score: {interrupt_data.get('quality_score', '?')}/100\n"
+                        f"Gaps: {interrupt_data.get('gaps', [])}\n\n"
+                        f"[bold]Critique Scores:[/bold]\n{interrupt_data.get('scores', 'N/A')}\n\n"
+                        f"[green]完整报告: {interrupt_data.get('report_file', 'N/A')}[/green]\n\n"
+                        f"[dim]输入 approve / revise: <反馈> / abort[/dim]",
+                        style="yellow",
+                        title="Human-in-the-Loop",
+                    ))
+
+                    # Get user decision
+                    decision = typer.prompt("决策").strip()
+                    console.print(f"[dim]Resuming with: {decision}[/dim]\n")
+
+                    # Resume workflow
+                    final_state = await workflow.ainvoke(Command(resume=decision), config)
+                    gs = workflow.get_state(config)
+
         except Exception as e:
             logger.exception("Research pipeline failed")
             console.print(f"\n[red]Pipeline error: {e}[/red]")
@@ -196,6 +253,8 @@ async def run_research(topic: str, agents_config_path: str, research_config_path
         finally:
             if mcp_manager:
                 await mcp_manager.disconnect_all()
+            if _checkpointer_conn is not None:
+                await _checkpointer_conn.close()
 
     report = final_state.get("final_report", final_state.get("draft_report", "No report generated."))
     quality = final_state.get("quality_score", 0)
@@ -224,8 +283,22 @@ def research(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ):
     """Run the multi-agent research pipeline on a topic."""
+    # Configure loguru: remove default handler, then add handlers based on verbosity
+    logger.remove()
     if verbose:
-        logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
+        logger.add(
+            sys.stderr,
+            level="INFO",
+            format="<level>[{name}]</level> {message}",
+        )
+    else:
+        logger.add(sys.stderr, level="ERROR")
+
+    # Also suppress noisy stdlib logging from libraries (mcp uses stdlib, not loguru)
+    if not verbose:
+        import logging as _logging
+        # Configure root logger before any library calls basicConfig
+        _logging.basicConfig(level=_logging.WARNING, format="%(message)s", force=True)
 
     asyncio.run(run_research(topic, agents, config))
 

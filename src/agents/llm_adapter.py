@@ -10,7 +10,6 @@ Supports: Anthropic (Claude), OpenAI (GPT), DeepSeek, Ollama (local).
 from __future__ import annotations
 
 import json
-import logging
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -22,7 +21,7 @@ from src._framework import Message as OM_Message
 from src._framework import ToolCall as OM_ToolCall
 from src.llm.config import AgentLLMConfig
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 @dataclass

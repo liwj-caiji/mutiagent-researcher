@@ -1,12 +1,11 @@
 """MCPManager — manages MCP server subprocess lifecycle and tool collection creation."""
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-from src._framework import MCPClients, Terminate, ToolCollection
+from loguru import logger
 
-logger = logging.getLogger(__name__)
+from src._framework import MCPClients, Terminate, ToolCollection
 
 
 class MCPManager:
