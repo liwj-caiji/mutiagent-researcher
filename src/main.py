@@ -221,7 +221,7 @@ async def run_research(topic: str, agents_config_path: str, research_config_path
 
             # Handle HITL resume loop
             if hitl_enabled:
-                gs = workflow.get_state(config)
+                gs = await workflow.aget_state(config)
                 while gs and gs.interrupts:
                     interrupt_data = gs.interrupts[0].value
 
@@ -244,7 +244,7 @@ async def run_research(topic: str, agents_config_path: str, research_config_path
 
                     # Resume workflow
                     final_state = await workflow.ainvoke(Command(resume=decision), config)
-                    gs = workflow.get_state(config)
+                    gs = await workflow.aget_state(config)
 
         except Exception as e:
             logger.exception("Research pipeline failed")
