@@ -100,7 +100,10 @@ async def planner_node(
     progress: ProgressTracker | None = None,
     timeout: float = 300,
 ) -> dict:
-    """Plan the research: decompose topic into outline and search queries."""
+    """Plan the research: decompose topic into outline and search queries.
+
+    In round 1, plans from scratch. In subsequent rounds, uses accumulated
+    knowledge, round history, and search feedback to focus on filling gaps."""
     round_num = state.get("research_round", 1)
     logger.info(f"[Planner] Round {round_num} — planning...")
 
@@ -115,10 +118,67 @@ async def planner_node(
         )
     else:
         gaps_text = "\n".join(f"- {g}" for g in gaps) if gaps else "No specific gaps identified."
+
+        # ── Accumulated knowledge summary ──
+        accumulated = state.get("accumulated_knowledge", [])
+        knowledge_text = ""
+        if accumulated:
+            sorted_knowledge = sorted(accumulated, key=lambda k: k.get("confidence", 0), reverse=True)
+            knowledge_text = "\n".join(
+                f"- [conf={k.get('confidence', '?')}, r{k.get('round', '?')}] {k.get('claim', '')}"
+                for k in sorted_knowledge[:20]
+            ) if sorted_knowledge else "No verified facts yet."
+        if not knowledge_text:
+            knowledge_text = "No accumulated knowledge yet."
+
+        # ── Round history summary ──
+        round_history = state.get("round_history", [])
+        history_text = ""
+        if round_history:
+            for rh in round_history:
+                r = rh.get("round", "?")
+                scores = rh.get("critic_scores", {})
+                score_summary = ", ".join(f"{k}={v}" for k, v in scores.items())
+                str_text = "; ".join(rh.get("strengths", [])[:2]) or "none"
+                gap_text = "; ".join(rh.get("gaps", [])[:3]) or "none"
+                history_text += (
+                    f"Round {r}: scores {{{score_summary}}}, "
+                    f"strengths: {str_text}, gaps: {gap_text}\n"
+                )
+        if not history_text:
+            history_text = "No previous rounds."
+
+        # ── Search effectiveness ──
+        search_feedback = state.get("search_feedback", [])
+        feedback_text = ""
+        if search_feedback:
+            productive = [sf for sf in search_feedback if sf.get("productive")]
+            unproductive = [sf for sf in search_feedback if not sf.get("productive")]
+            if productive:
+                feedback_text += "\n".join(
+                    f"  [+ productive] {sf.get('query', '?')}" for sf in productive[:5]
+                ) + "\n"
+            if unproductive:
+                feedback_text += "\n".join(
+                    f"  [- unproductive] {sf.get('query', '?')}: {sf.get('reason', '')}"
+                    for sf in unproductive[:5]
+                )
+        if not feedback_text:
+            feedback_text = "No search effectiveness data yet."
+
         request = (
             f"Research topic: {topic}\n\n"
-            f"Current gaps to address:\n{gaps_text}\n\n"
-            "Based on these gaps, generate additional search queries. Focus only on filling identified gaps."
+            f"=== ACCUMULATED KNOWLEDGE (verified facts, do NOT re-search) ===\n"
+            f"{knowledge_text}\n\n"
+            f"=== ROUND HISTORY ===\n"
+            f"{history_text}\n\n"
+            f"=== SEARCH EFFECTIVENESS ===\n"
+            f"{feedback_text}\n\n"
+            f"=== CURRENT GAPS ===\n{gaps_text}\n\n"
+            "Using the accumulated knowledge and search effectiveness data, generate "
+            "NEW search queries. DO NOT re-search topics that already have high-confidence "
+            "(confidence >= 0.8) verified findings. Avoid query directions that were "
+            "previously unproductive. Focus only on filling remaining gaps."
         )
 
     await _run_agent_with_progress(planner, request, "planner", progress, timeout)
@@ -227,28 +287,50 @@ async def analyst_node(
     progress: ProgressTracker | None = None,
     timeout: float = 600,
 ) -> dict:
-    """Analyze search results and extract key findings."""
+    """Analyze search results and extract key findings with structured knowledge."""
     search_results = state.get("search_results", [])
-    logger.info(f"[Analyst] Analyzing {len(search_results)} search result sets...")
+    round_num = state.get("research_round", 1)
+    logger.info(f"[Analyst] Analyzing {len(search_results)} search result sets (round {round_num})...")
 
     all_content = ""
     for i, sr in enumerate(search_results):
         all_content += f"\n### Source Group {i+1}: {sr.get('query', 'Unknown')}\n"
         all_content += sr.get("content", "")[:5000]
 
+    # Build context from previous rounds' accumulated knowledge
+    accumulated = state.get("accumulated_knowledge", [])
+    knowledge_context = ""
+    if accumulated and round_num > 1:
+        sorted_knowledge = sorted(accumulated, key=lambda k: k.get("confidence", 0), reverse=True)
+        knowledge_context = "\n\n=== Previously Verified Facts (do not re-verify, reference by claim) ===\n"
+        for k in sorted_knowledge[:15]:
+            knowledge_context += (
+                f"- [{k.get('confidence', '?')}] {k.get('claim', '')} "
+                f"(source: {k.get('source', 'unknown')})\n"
+            )
+
     request = (
         f"Research topic: {state['topic']}\n\n"
+        f"{knowledge_context}"
         f"Please critically analyze these search results:\n{all_content[:30000]}\n\n"
-        "Provide: key findings, credibility assessment, contradictions between sources, "
-        "information gaps, and recommended conclusions. Call Terminate when done."
+        "If previously verified facts are provided, reference them where relevant "
+        "instead of re-validating. Focus on NEW findings.\n"
+        "Output the structured JSON block with verified_facts as specified in your system prompt. "
+        "Call Terminate when done."
     )
 
     await _run_agent_with_progress(analyst, request, "analyst", progress, timeout)
     assistant_msgs = [m for m in analyst.messages if m.role == "assistant" and m.content]
     result = assistant_msgs[-1].content if assistant_msgs else ""
 
+    parsed = analyst.parse_analysis(result)
+    verified_facts = parsed.get("verified_facts", [])
+    for fact in verified_facts:
+        fact["round"] = round_num
+
     return {
         "analyses": [{"content": result, "timestamp": ""}],
+        "accumulated_knowledge": verified_facts,
         "current_phase": "analyzed",
     }
 
@@ -261,20 +343,35 @@ async def synthesizer_node(
     progress: ProgressTracker | None = None,
     timeout: float = 600,
 ) -> dict:
-    """Synthesize all analyses into a unified framework."""
+    """Synthesize all analyses into a unified framework, building on prior knowledge."""
     analyses = state.get("analyses", [])
     outline = state.get("outline", [])
-    logger.info(f"[Synthesizer] Synthesizing {len(analyses)} analyses...")
+    round_num = state.get("research_round", 1)
+    logger.info(f"[Synthesizer] Synthesizing {len(analyses)} analyses (round {round_num})...")
 
-    analyses_text = "\n\n".join(a.get("content", "")[:5000] for a in analyses)[:30000]
+    analyses_text = "\n\n".join(a.get("content", "")[:5000] for a in analyses)[:25000]
     outline_text = json.dumps(outline, ensure_ascii=False, indent=2)
+
+    # Build accumulated knowledge context for cross-round continuity
+    accumulated = state.get("accumulated_knowledge", [])
+    knowledge_context = ""
+    if accumulated and round_num > 1:
+        sorted_knowledge = sorted(accumulated, key=lambda k: k.get("confidence", 0), reverse=True)
+        knowledge_context = "\n\n=== Accumulated Knowledge (verified facts from all rounds) ===\n"
+        for k in sorted_knowledge[:20]:
+            knowledge_context += (
+                f"- [conf={k.get('confidence', '?')}, r{k.get('round', '?')}] "
+                f"{k.get('claim', '')}\n"
+            )
 
     request = (
         f"Research topic: {state['topic']}\n\n"
         f"Outline:\n{outline_text}\n\n"
-        f"Analysis findings:\n{analyses_text}\n\n"
+        f"Analysis findings:\n{analyses_text}\n"
+        f"{knowledge_context}\n\n"
         "Synthesize all findings into a cohesive framework following the outline. "
         "Resolve contradictions. Identify best-supported conclusions. "
+        "Integrate accumulated knowledge from previous rounds. "
         "Write in a structured format the Writer can directly use. Call Terminate when done."
     )
 
@@ -296,21 +393,48 @@ async def writer_node(
     progress: ProgressTracker | None = None,
     timeout: float = 900,
 ) -> dict:
-    """Generate the full research report."""
-    logger.info(f"[Writer] Writing report (round {state.get('research_round', 1)})...")
+    """Generate the research report — fresh in round 1, revision in later rounds."""
+    round_num = state.get("research_round", 1)
+    logger.info(f"[Writer] Writing report (round {round_num})...")
 
     synthesis = state.get("synthesized_findings", "")
     outline = state.get("outline", [])
     outline_text = json.dumps(outline, ensure_ascii=False, indent=2)
+    previous_draft = state.get("previous_draft", "")
+    gaps = state.get("gaps", [])
+    critique = state.get("critique", {})
 
-    request = (
-        f"Research topic: {state['topic']}\n\n"
-        f"Outline:\n{outline_text}\n\n"
-        f"Synthesized findings:\n{synthesis[:20000]}\n\n"
-        "Write a comprehensive research report. Include executive summary, all outline sections, "
-        "and references. Use in-text citations [1], [2]. Write substantive, detailed content. "
-        "Output in Markdown format. Call Terminate when done."
-    )
+    if previous_draft and round_num > 1:
+        # Revision mode: improve the previous draft with new findings
+        weaknesses = critique.get("weaknesses", [])
+        weaknesses_text = "\n".join(f"- {w}" for w in weaknesses) if weaknesses else "none noted"
+        gaps_text = "\n".join(f"- {g}" for g in gaps) if gaps else "none noted"
+
+        request = (
+            f"Research topic: {state['topic']}\n\n"
+            f"=== PREVIOUS DRAFT (to revise) ===\n{previous_draft[:15000]}\n\n"
+            f"=== CRITIC FEEDBACK ===\n"
+            f"Weaknesses to fix:\n{weaknesses_text}\n"
+            f"Gaps to fill:\n{gaps_text}\n\n"
+            f"=== NEW FINDINGS TO INCORPORATE ===\n{synthesis[:10000]}\n\n"
+            "REVISE the previous draft into an improved report. "
+            "Fix the identified weaknesses, fill gaps with new findings, "
+            "improve depth and credibility. Preserve well-written sections. "
+            "Output the COMPLETE revised report in Markdown. "
+            "Include executive summary, all sections, in-text citations [1][2], "
+            "and references. Call Terminate when done."
+        )
+    else:
+        # Fresh report (round 1)
+        request = (
+            f"Research topic: {state['topic']}\n\n"
+            f"Outline:\n{outline_text}\n\n"
+            f"Synthesized findings:\n{synthesis[:20000]}\n\n"
+            "Write a comprehensive research report. Include executive summary, "
+            "all outline sections, and references. Use in-text citations [1], [2]. "
+            "Write substantive, detailed content. "
+            "Output in Markdown format. Call Terminate when done."
+        )
 
     await _run_agent_with_progress(writer, request, "writer", progress, timeout)
     assistant_msgs = [m for m in writer.messages if m.role == "assistant" and m.content]
@@ -335,25 +459,33 @@ async def critic_node(
     progress: ProgressTracker | None = None,
     timeout: float = 300,
 ) -> dict:
-    """Review report quality and determine if another round is needed."""
+    """Review report quality, generate round summary and search feedback."""
     draft = state.get("draft_report", "")
-    logger.info(f"[Critic] Reviewing report (round {state.get('research_round', 1)})...")
+    current_round = state.get("research_round", 1)
+    search_queries = state.get("search_queries", [])
+    logger.info(f"[Critic] Reviewing report (round {current_round})...")
+
+    # Include search queries context for the Critic to evaluate search effectiveness
+    queries_context = ""
+    if search_queries:
+        queries_context = f"\n\nSearch queries used this round:\n" + "\n".join(
+            f"- {q}" for q in search_queries[:10]
+        )
 
     request = (
         f"Research topic: {state['topic']}\n\n"
-        f"Report to review:\n{draft[:20000]}\n\n"
-        "CRITICAL: You MUST write your full evaluation (including the JSON with scores) "
-        "in your response BEFORE you call Terminate. Do NOT call Terminate until you have "
-        "output the complete review JSON.\n\n"
+        f"Report to review:\n{draft[:20000]}\n"
+        f"{queries_context}\n\n"
+        "CRITICAL: You MUST write your full evaluation (including the JSON with scores "
+        "and search_feedback) in your response BEFORE you call Terminate. "
+        "Do NOT call Terminate until you have output the complete review JSON.\n\n"
         "Evaluate this report. Output scores (0-100) for completeness, accuracy, structure, "
-        "depth, credibility, clarity. Output as JSON with overall_score. Identify gaps. "
-        "Recommend accept or revise. Call Terminate when done."
+        "depth, credibility, clarity. For each search query, assess whether it produced "
+        "productive results (search_feedback field). Output as JSON with overall_score. "
+        "Identify gaps. Recommend accept or revise. Call Terminate when done."
     )
 
     await _run_agent_with_progress(critic, request, "critic", progress, timeout)
-    # Collect all assistant messages with content, newest first.
-    # The last message is often the Terminate tool call (empty content),
-    # so search backward for substantive content.
     all_msgs = [m for m in critic.messages if m.role == "assistant" and m.content]
     result_text = ""
     for m in reversed(all_msgs):
@@ -366,7 +498,6 @@ async def critic_node(
 
     overall = review.get("overall_score", 70)
     gaps = review.get("gaps", [])
-    current_round = state.get("research_round", 1)
 
     return {
         "quality_score": overall,
@@ -375,7 +506,15 @@ async def critic_node(
         "current_phase": "reviewed",
         "overall_score": overall,
         "research_round": current_round + 1,
-        # Debug: save raw agent responses to diagnose parse failures
+        "previous_draft": state.get("draft_report", ""),
+        "round_history": [{
+            "round": current_round,
+            "critic_scores": review.get("scores", {}),
+            "strengths": review.get("strengths", []),
+            "gaps": gaps,
+            "overall_score": overall,
+        }],
+        "search_feedback": review.get("search_feedback", []),
         "_critic_raw_result": result_text[:2000],
         "_critic_msg_count": len(all_msgs),
     }

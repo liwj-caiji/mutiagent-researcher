@@ -49,6 +49,16 @@ class ResearchState(TypedDict, total=False):
     critique: dict  # {scores, strengths, weaknesses, gaps, recommendation}
     gaps: list[str]
 
+    # ── Incremental memory (cross-round accumulation) ──
+    accumulated_knowledge: Annotated[list[dict], operator.add]
+    #  Verified facts that survive across rounds: {claim, confidence, source, round}
+    round_history: Annotated[list[dict], operator.add]
+    #  Per-round summaries: {round, critic_scores, strengths, gaps, overall_score}
+    previous_draft: str
+    #  Previous round's draft for Writer to revise instead of rewriting from scratch
+    search_feedback: Annotated[list[dict], operator.add]
+    #  Search effectiveness: {query, productive, reason}
+
     # ── Flow control ──
     current_phase: str  # init | planned | searched | analyzed | synthesized | drafted | reviewed | awaiting_human | formatted
     research_round: int

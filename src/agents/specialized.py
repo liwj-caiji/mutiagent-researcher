@@ -50,7 +50,11 @@ Output your plan as structured JSON:
 }
 ```
 
-When analyzing gaps from a previous round, focus only on what is still missing and generate targeted search queries.
+When analyzing gaps from a previous round:
+- Review the accumulated knowledge (verified facts) to avoid re-searching proven topics
+- Study the round history to understand what's already been covered and scored
+- Check search effectiveness feedback to avoid unproductive query directions
+- Focus only on what is still missing and generate targeted, novel search queries
 After you finish planning, call the Terminate tool."""
 
 SEARCHER_PROMPT = """You are an information retrieval specialist. Your job is to find relevant, high-quality information.
@@ -74,7 +78,25 @@ For the provided search results:
 5. Note information gaps requiring further investigation
 
 Add analytical value — don't just summarize. Connect findings, identify patterns, note implications.
-After completing your analysis, call the Terminate tool."""
+
+CRITICAL: Output a structured JSON block with your analysis before calling Terminate:
+
+```json
+{
+    "verified_facts": [
+        {"claim": "factual statement", "confidence": 0.85, "source": "url or source name", "notes": "brief assessment"}
+    ],
+    "contradictions": [
+        {"claim_a": "...", "source_a": "...", "claim_b": "...", "source_b": "...", "resolution": "..."}
+    ],
+    "key_findings": "summary paragraph",
+    "information_gaps": ["gap description"]
+}
+```
+
+confidence scale: 1.0 = widely-established consensus, 0.8-0.9 = well-supported by credible sources, 0.5-0.7 = plausible but needs more evidence, <0.5 = speculative.
+
+After completing your analysis and outputting the JSON, call the Terminate tool."""
 
 SYNTHESIZER_PROMPT = """You are a research synthesizer. Your job is to integrate all analysis findings into a coherent framework.
 
@@ -113,6 +135,8 @@ Evaluate on these dimensions (score each 0-100):
 5. Credibility: authoritative sources? contrary evidence acknowledged?
 6. Clarity: writing clear and engaging?
 
+For each search query that was used, assess whether it produced productive results.
+
 Output as JSON:
 ```json
 {
@@ -128,6 +152,9 @@ Output as JSON:
     "strengths": ["..."],
     "weaknesses": ["..."],
     "gaps": ["missing info: ..."],
+    "search_feedback": [
+        {"query": "search query text", "productive": true, "reason": "why it was (not) useful"}
+    ],
     "recommendation": "accept" or "revise"
 }
 ```
@@ -184,6 +211,48 @@ class AnalystAgent(ToolCallAgent):
     description: str = "Research analyst agent"
     system_prompt: str = ANALYST_PROMPT
     max_steps: int = 10
+
+    def parse_analysis(self, text: str | None = None) -> dict:
+        """Extract structured JSON analysis from agent's last response."""
+        import re
+        source = text or ""
+        if not source:
+            msgs = [m for m in self.messages if m.role == "assistant"]
+            if msgs:
+                source = msgs[-1].content or ""
+
+        # Tier 1: extract from markdown code fences
+        json_match = re.search(r'```(?:json)?\s*(.*?)```', source, re.DOTALL)
+        if json_match:
+            try:
+                return json.loads(json_match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        # Tier 2: find verified_facts key and extract enclosing JSON
+        facts_idx = source.find('"verified_facts"')
+        if facts_idx >= 0:
+            brace_start = source.rfind('{', 0, facts_idx)
+            if brace_start >= 0:
+                depth = 0
+                brace_end = -1
+                for i in range(brace_start, len(source)):
+                    if source[i] == '{':
+                        depth += 1
+                    elif source[i] == '}':
+                        depth -= 1
+                        if depth == 0:
+                            brace_end = i
+                            break
+                if brace_end >= 0:
+                    candidate = source[brace_start:brace_end + 1]
+                    try:
+                        return json.loads(candidate)
+                    except json.JSONDecodeError:
+                        pass
+
+        # Fallback: return raw text as key_findings
+        return {"verified_facts": [], "key_findings": source, "information_gaps": []}
 
 
 class SynthesizerAgent(ToolCallAgent):
