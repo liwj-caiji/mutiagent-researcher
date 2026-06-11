@@ -451,11 +451,12 @@ uv run python -m src.tools.mcp_server
 | Synthesizer 输出 | `synthesized_findings` | str |
 | Writer 输出 | `draft_report`, `final_report`, `citations` | str / str / list[dict] |
 | Critic 输出 | `quality_score`, `critique`, `gaps` | float / dict / list[str] |
+| 增量记忆 | `accumulated_knowledge`（verified facts 跨轮累积）, `round_history`（每轮评分/优缺点）, `previous_draft`（上轮草稿供修订）, `search_feedback`（query 有效性评估） | Annotated[list[dict], operator.add] × 3 + str |
 | 流程控制 | `current_phase`, `research_round`, `max_rounds`, `quality_threshold`, `overall_score` | — |
 | HITL | `human_decision`, `review_path` | str / str |
 | 消息 | `messages` | Annotated[list, add_messages] |
 
-`operator.add` reducer 用于 `search_results` 和 `analyses`，支持并行节点结果自动追加合并。
+`operator.add` reducer 用于 `search_results`、`analyses`、`accumulated_knowledge`、`round_history`、`search_feedback`，支持并行节点结果和跨轮增量数据自动追加合并。`previous_draft` 为普通 str 字段（非 annotated），每轮 Critic 执行时覆盖为最新值。
 
 ### 9.2 节点实现（`src/graph/nodes.py`）
 
@@ -476,12 +477,12 @@ Agent 执行结果从 `agent.messages` 中最后一条 assistant 回复提取。
 
 | 节点 | 请求内容 | 超时 | 特殊行为 |
 |------|---------|------|---------|
-| `planner_node` | 轮次 1: topic + "create plan"。后续轮次: topic + gaps + "focus on gaps" | 300s | 调用 `planner.parse_plan()` 提取 JSON |
+| `planner_node` | 轮次 1: topic + "create plan"。后续轮次: topic + accumulated_knowledge + round_history + search_feedback + gaps + "只针对 gap 生成新 query" | 300s | 调用 `planner.parse_plan()` 提取 JSON；Round ≥2 时接收全部增量记忆，避免重搜已验证事实和无效方向 |
 | `searcher_node` | 逐 query 执行（最多 10 个），每个 query 独立 agent 实例 | 600s | **并行搜索**（asyncio.gather + Semaphore），每个查询创建独立 SearcherAgent，通过 `max_parallel_searches` 控制并发数 |
-| `analyst_node` | 所有搜索结果拼接（截断 30k chars）+ analysis 指令 | 600s | — |
-| `synthesizer_node` | outline (JSON) + 所有分析（截断 30k chars）+ synthesize 指令 | 600s | — |
-| `writer_node` | outline + synthesized findings（截断 20k chars）+ writing 指令 | 900s | — |
-| `critic_node` | draft report（截断 20k chars）+ review 指令 | 300s | 调用 `critic.parse_review()` 提取评分；从后向前搜索 agent 消息，取第一条实质性内容（>50 字符），避免取到 Terminate 工具调用的空消息；请求中包含强指令要求先输出 JSON 再调 Terminate |
+| `analyst_node` | 所有搜索结果拼接（截断 30k chars）+ analysis 指令。Round ≥2 时附带已积累的 verified_facts（"do not re-verify"） | 600s | 调用 `analyst.parse_analysis()` 提取结构化 JSON（verified_facts, contradictions, key_findings）；verified_facts 标记 round 后写入 accumulated_knowledge |
+| `synthesizer_node` | outline (JSON) + 所有分析（截断 25k chars）+ 已积累知识 + synthesize 指令 | 600s | Round ≥2 时接收 accumulated_knowledge 作为跨轮上下文 |
+| `writer_node` | Round 1: outline + synthesized findings（截断 20k chars）+ writing 指令。Round ≥2: previous_draft + critique + gaps + new findings + "REVISE the previous draft" | 900s | **迭代修订模式**：后续轮次基于上一轮草稿修改而非从零重写，保留优秀部分 |
+| `critic_node` | draft report（截断 20k chars）+ search_queries + review 指令（含 search_feedback 要求）| 300s | 调用 `critic.parse_review()` 提取评分；新增输出 search_feedback（评估每个 query 有效性）、round_history（轮次总结）、previous_draft（传递给下轮 Writer）|
 | `human_review_node` | 保存草稿到文件，通过 `interrupt()` 暂停 | — | HITL 启用时插入 critic 和 formatter 之间；用户可 approve / revise / abort |
 
 **Searcher 并行搜索**：Searcher 是唯一需要并行化的节点（多个搜索查询彼此独立）。实现采用 `asyncio.gather` + `asyncio.Semaphore` 方案：
@@ -519,7 +520,50 @@ results = await asyncio.gather(*tasks, return_exceptions=True)
 
 Send API 的优势在于**异构并行**（不同节点不同 Agent 类型各自执行），而本项目 Searcher 的查询是同质的（同一套工具/同一 Agent 类型），用 `asyncio.gather` 更简洁。如果未来需要 Planner 同时向 Searcher 和外部 API 分发任务，Send API 是天然选择。
 
-### 9.3 工作流构建（`src/graph/workflow.py`）
+### 9.3 增量记忆机制（v0.7.0）
+
+#### 设计动机
+
+多轮迭代的核心挑战是**信息丢失**：Critic → Planner 回环时，只传递 `gaps`（文字描述），以下关键信息全部丢失：
+
+- 上一轮的实际搜索结果（Searcher 盲目重搜）
+- 已验证事实及可信度评估（Analyst 的结论被浪费）
+- 搜索 query 的有效性反馈（无效方向重复执行）
+- 上一轮草稿（Writer 从零重写而非迭代改进）
+
+#### 解决方案
+
+在 `ResearchState` 中新增 4 个增量字段，利用 `operator.add` reducer 实现跨轮累积：
+
+| 字段 | 类型 | 来源节点 | 消费节点 |
+|------|------|---------|---------|
+| `accumulated_knowledge` | Annotated[list[dict], operator.add] | Analyst（verified_facts） | Planner, Analyst, Synthesizer |
+| `round_history` | Annotated[list[dict], operator.add] | Critic（轮次总结） | Planner |
+| `search_feedback` | Annotated[list[dict], operator.add] | Critic（query 评估） | Planner |
+| `previous_draft` | str（非 annotated） | Critic（记录上轮草稿） | Writer |
+
+#### 数据流
+
+```
+Round 1: Planner → Searcher → Analyst → Synthesizer → Writer → Critic
+                                                              │
+                        输出: round_history, search_feedback, previous_draft, gaps
+                                                              │
+Round 2: Planner (看全部增量记忆) → Searcher (聚焦新方向)
+           → Analyst (继承已有知识, 仅验证新发现)
+           → Synthesizer (融合新旧知识)
+           → Writer (基于 previous_draft 迭代修订)
+           → Critic (再次评估)
+```
+
+#### 关键设计决策
+
+- **`previous_draft` 不使用 operator.add**：只需要最新一版的草稿供 Writer 修订，而非历史所有版本
+- **Analyst 标记 round**：每个 verified_fact 记录 `round` 字段，便于区分信息来源轮次
+- **prompt 驱动的增量行为**：所有增量记忆通过 prompt 传递给 Agent，不修改 Agent 框架代码
+- **降级兼容**：当增量记忆为空（round 1 或首次运行）时，各节点退化为原始行为
+
+### 9.4 工作流构建（`src/graph/workflow.py`）
 
 `build_workflow()` 组装完整流水线：
 
@@ -559,7 +603,7 @@ Send API 的优势在于**异构并行**（不同节点不同 Agent 类型各自
    ```
    `human_review_node` 将草稿保存到 `review_dir`，调用 LangGraph `interrupt()` 暂停执行。`main.py` 通过 `console.input()` 获取用户决策，`Command(resume=...)` 恢复执行。`ProgressTracker.pause()/resume()` 在输入期间暂停 Rich Live 显示，避免输入被刷新覆盖。
 
-6. **Checkpointer**：HITL 启用时自动创建 SQLite checkpointer（`AsyncSqliteSaver`），LangGraph `interrupt()` 依赖 checkpoint 机制保存暂停点。
+6. **Checkpointer 与崩溃恢复**：HITL 启用时自动创建 SQLite checkpointer（`AsyncSqliteSaver`），LangGraph `interrupt()` 依赖 checkpoint 机制保存暂停点。checkpoint 同时支持从任意节点崩溃点恢复执行（见 [12. CLI 入口](#12-cli-入口) 中的崩溃恢复流程）。
 
 7. **_NodeDebugSaver**：当 `debug_dir` 配置时，包装每个节点函数。每次节点返回后将其输出 dict 序列化为 JSON 文件（`debug/<时间戳>_<主题>/<序号>_<节点名>.json`），包含 node、step、timestamp、topic、research_round、output 字段。用于质量评估和问题诊断。
 
@@ -612,6 +656,36 @@ uv run python -m src.main "研究主题" --config config/research.yaml --agents 
 7. `workflow.ainvoke(initial_state)` — 执行流水线
 8. 保存报告到 `output_dir`，文件名自动生成（topic + 时间戳）
 9. 终端打印报告文件路径（不再输出完整预览，避免大报告截断终端）
+
+### 崩溃恢复（v0.7.0）
+
+启动时每个 run 生成唯一 `thread_id`（UUID），打印到终端并保存运行记录到 `./data/runs.json`：
+
+```
+Run ID: a1b2c3d4-e5f6-...
+If interrupted, resume with: uv run python -m src.main resume --last
+```
+
+**运行状态枚举**：`running` → `completed`（正常结束）/ `crashed`（异常中断）
+
+**CLI 命令**：
+
+```bash
+uv run python -m src.main resume --last    # 恢复最近中断的 run
+uv run python -m src.main resume <run-id>  # 恢复指定 run
+uv run python -m src.main resume           # 列出所有中断的 run
+```
+
+**恢复流程**（`_resume_run()`）：
+
+1. 加载 `config/agents.yaml` 和 `config/research.yaml`（应与原 run 相同）
+2. 连接 `./data/checkpoints.sqlite`，用 `thread_id` 获取 checkpoint 状态
+3. 如果 state 有 pending HITL interrupt → 显示评审面板，等待用户输入 → `Command(resume=decision)`
+4. 如果无 interrupt → `workflow.ainvoke(None, config)` 继续执行
+5. 如果执行中遇到新的 HITL interrupt → 进入标准 HITL 循环
+6. 异常时 → 保存 `crashed` 状态 + error 信息，打印恢复提示
+
+**关键设计**：`load_runs()` 按 `updated_at` 倒序排列，`--last` 取列表第一个即为最近中断的 run。无论中断发生在 HITL 等待还是节点执行中途，checkpoint 都能恢复到最近一个 super-step 结束点，重新执行失败节点。
 
 ### 配置文件
 
@@ -710,7 +784,8 @@ if config.provider == "new_provider":
 - Searcher 已实现 asyncio.gather 并行搜索（2026-06），但仅限同质查询并行，异构分发待 Send API
 - 报告仅支持 Markdown 格式（PDF/Word/HTML 待扩展）
 - 无 Token 计数和成本统计
-
+- 崩溃恢复要求 config 文件不变更（workflow 结构需与中断时一致）
+- 运行记录（`runs.json`）无自动清理，长期使用需手动维护
 - 引用提取依赖 LLM 自行解析，未做结构化处理
 - `PythonExecuteTool` 无 Docker 隔离，不适用于执行不可信代码
 - `WebScraperTool` 不执行 JavaScript，对动态渲染页面无效
@@ -762,7 +837,7 @@ muti_agent/
 ├── docs/
 │   └── architecture.md      # 本文档
 ├── reports/                 # 输出报告
-├── data/                    # 运行时数据（checkpoints, chroma, workspace）
+├── data/                    # 运行时数据（checkpoints.sqlite, runs.json, workspace）
 ├── pyproject.toml
 ├── .env.example
 └── README.md
@@ -771,6 +846,26 @@ muti_agent/
 ---
 
 ## 附录 A: 变更记录
+
+### [0.7.0] — 2026-06-12
+
+**Added**
+- 轮次间增量记忆：`accumulated_knowledge`（Analyst 结构化 verified_facts）、`round_history`（Critic 轮次总结）、`search_feedback`（query 有效性评估）、`previous_draft`（草稿跨轮传递）
+- Writer 迭代修订模式：Round ≥2 时基于 previous_draft + critic feedback 修改而非从零重写
+- Planner Round ≥2 增量上下文：接收全部增量记忆，只生成针对 gap 的新 query，避开高置信度已验证方向
+- Analyst 结构化输出：`parse_analysis()` 方法提取 verified_facts（3 层 JSON 解析），每个 fact 标记 `round` 字段
+- Synthesizer 跨轮知识融合：Round ≥2 时接收 accumulated_knowledge 作为上下文
+- 崩溃恢复功能：`resume` CLI 命令，`--last` 恢复最近中断 run，运行记录持久化（`./data/runs.json`）
+- `save_run_record()` / `load_runs()` 运行状态管理
+- `_handle_hitl_loop()` / `_show_hitl_prompt()` HITL 循环抽取为共享辅助函数
+
+**Changed**
+- `ANALYST_PROMPT` 要求输出结构化 JSON（verified_facts, contradictions, key_findings, information_gaps）
+- `CRITIC_PROMPT` 新增 `search_feedback` 字段评估搜索 query 有效性
+- `PLANNER_PROMPT` 增加增量记忆使用指引
+- `critic_node` 新增输出 `round_history`、`search_feedback`、`previous_draft`
+- `synthesizer_node` 接受 accumulated_knowledge 上下文（Round ≥2）
+- `run_research()` 重构：thread_id 提前生成、HITL 循环抽取到 `_handle_hitl_loop()`
 
 ### [0.6.0] — 2026-06-11
 
@@ -859,3 +954,6 @@ muti_agent/
 | Critic 评分 3 层 JSON 解析 | LLM 输出格式多变，需要鲁棒的提取策略 |
 | MCP 双模式架构 | 进程内用于开发调试，MCP 模式用于生产隔离 |
 | `research_round` 在 node 中递增 | LangGraph conditional edge 不修改 state（会被丢弃） |
+| `operator.add` 用于增量记忆字段 | 跨轮累积数据（accumulated_knowledge, round_history, search_feedback），不覆盖历史 |
+| `previous_draft` 不使用 operator.add | 只需要最新一版草稿供修订，历史版本冗余 |
+| Prompt 驱动增量行为 | 不修改 Agent 框架代码，增量记忆通过 prompt 上下文传递 |

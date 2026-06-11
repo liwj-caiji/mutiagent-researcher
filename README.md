@@ -22,6 +22,23 @@
 
 详细架构与实现文档：[docs/architecture.md](docs/architecture.md)
 
+## 轮次间增量记忆
+
+Pipeline 支持多轮迭代。当 Critic 评分低于阈值时，系统会带着 gap 回到 Planner 重新搜索和改进。与简单的 "从零重试" 不同，项目实现了跨轮次的增量记忆传递：
+
+| 记忆字段 | 来源 | 作用 |
+|---------|------|------|
+| **accumulated_knowledge** | Analyst 输出结构化 verified_facts | 跨轮累积已验证事实，避免重复搜索 |
+| **round_history** | Critic 输出每轮评分/优缺点 | Planner 了解哪些方向已覆盖、哪些薄弱 |
+| **search_feedback** | Critic 评估每个 query 有效性 | 指导下轮避开无效搜索方向 |
+| **previous_draft** | 上一轮 Writer 产出的草稿 | Writer 在后续轮次**修订**而非重写 |
+
+关键行为变化：
+- **Planner**（Round ≥2）：接收全部增量记忆，只生成针对 gap 的**新 query**，避开高置信度已覆盖方向
+- **Analyst**（Round ≥2）：参考已积累的 verified_facts，只关注新发现
+- **Writer**（Round ≥2）：基于 previous_draft + Critic feedback 迭代修改，保留优秀部分
+- **Synthesizer**（Round ≥2）：融合新旧知识，构建一致的跨轮框架
+
 ## 项目结构
 
 ```
@@ -90,6 +107,31 @@ uv run python -m src.main "Research topic" --config config/research.yaml -v
 | `--config` / `-c` | 研究流程配置文件路径 | `config/research.yaml` |
 | `--agents` / `-a` | Agent LLM 配置文件路径 | `config/agents.yaml` |
 | `--verbose` / `-v` | 启用详细日志（显示 agent 内部 ReAct 循环细节） | 关闭 |
+
+### 崩溃恢复
+
+Pipeline 支持从崩溃点恢复执行，无需从头重跑：
+
+```bash
+# 启动时自动打印 Run ID
+uv run python -m src.main "人工智能对教育的影响"
+# 输出: Run ID: a1b2c3d4-...
+#        If interrupted, resume with: uv run python -m src.main resume --last
+
+# 恢复最近一次中断的 run
+uv run python -m src.main resume --last
+
+# 列出所有中断的 run
+uv run python -m src.main resume
+
+# 恢复指定 run
+uv run python -m src.main resume <run-id>
+```
+
+运行状态持久化到 `./data/runs.json`，checkpoint 数据存储在 `./data/checkpoints.sqlite`，支持两种恢复场景：
+
+- **HITL 中断恢复**：用户正在评审时崩溃，恢复后重新显示评审面板
+- **节点崩溃恢复**：执行中网络故障等，从上一个 checkpoint 重新执行失败节点
 
 ## Agent 角色
 
