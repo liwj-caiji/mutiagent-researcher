@@ -47,6 +47,7 @@ from src.llm.config import AgentLLMConfig
 
 if TYPE_CHECKING:
     from src.utils.progress import ProgressTracker
+    from src.memory.long_term import LongTermMemory
 
 from loguru import logger
 
@@ -117,6 +118,7 @@ def build_workflow(
     checkpointer=None,
     debug_dir: str | None = None,
     topic: str = "",
+    long_term_memory: "LongTermMemory | None" = None,
 ) -> StateGraph:
     """Build and compile the research workflow StateGraph.
 
@@ -166,7 +168,7 @@ def build_workflow(
     t_wr = agent_timeouts.get("writer", 900)
     t_cr = agent_timeouts.get("critic", 300)
 
-    async def _planner_node(s): return await planner_node(s, planner, progress=progress, timeout=t_pl)
+    async def _planner_node(s): return await planner_node(s, planner, progress=progress, timeout=t_pl, long_term_memory=long_term_memory)
     async def _searcher_node(s): return await searcher_node(s, searcher_factory, progress=progress, timeout=t_se, max_parallel=max_parallel_searches)
     async def _analyst_node(s): return await analyst_node(s, analyst, progress=progress, timeout=t_an)
     async def _synthesizer_node(s): return await synthesizer_node(s, synthesizer, progress=progress, timeout=t_sy)
