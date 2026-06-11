@@ -34,10 +34,10 @@ max_parallel_searches: 3
 max_agent_turns:
   planner: 2
   searcher: 2
-  analyst: 2
-  synthesizer: 2
-  writer: 2
-  critic: 1
+  analyst: 3
+  synthesizer: 3
+  writer: 5
+  critic: 3
 
 # Wall-clock timeout per agent (seconds) — prevents infinite hangs
 agent_timeouts:

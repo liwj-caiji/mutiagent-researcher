@@ -50,11 +50,15 @@ class ResearchState(TypedDict, total=False):
     gaps: list[str]
 
     # ── Flow control ──
-    current_phase: str  # init | planned | searched | analyzed | synthesized | drafted | reviewed | formatted
+    current_phase: str  # init | planned | searched | analyzed | synthesized | drafted | reviewed | awaiting_human | formatted
     research_round: int
     max_rounds: int
     quality_threshold: float
     overall_score: float
+
+    # ── Human-in-the-loop ──
+    human_decision: str  # "approve" | "revise" | "abort"
+    review_path: str  # file path to the draft report for human review
 
     # ── Messages (for LangGraph checkpointing) ──
     messages: Annotated[list, add_messages]

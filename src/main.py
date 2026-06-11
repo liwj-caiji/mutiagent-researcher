@@ -239,12 +239,16 @@ async def run_research(topic: str, agents_config_path: str, research_config_path
                         title="Human-in-the-Loop",
                     ))
 
-                    # Get user decision — use console.input() so typed text is visible
-                    console.print()
-                    decision = console.input(
-                        "[yellow]👉 决策[/yellow] "
-                        "[dim](approve / revise: <意见> / abort)[/dim]: "
-                    ).strip()
+                    # Get user decision — pause live display so input isn't overwritten
+                    tracker.pause()
+                    try:
+                        console.print()
+                        decision = console.input(
+                            "[yellow]👉 决策[/yellow] "
+                            "[dim](approve / revise: <意见> / abort)[/dim]: "
+                        ).strip()
+                    finally:
+                        tracker.resume()
                     console.print(f"\n[dim]已收到: {decision}[/dim]\n")
 
                     # Resume workflow
@@ -281,9 +285,6 @@ async def run_research(topic: str, agents_config_path: str, research_config_path
     report_path.write_text(report, encoding="utf-8")
 
     console.print(f"\n[green]Report saved to:[/green] {report_path}")
-    console.print("\n[bold]Report Preview:[/bold]\n")
-    preview = report[:1000] + ("..." if len(report) > 1000 else "")
-    console.print(Markdown(preview))
 
 
 @app.command()

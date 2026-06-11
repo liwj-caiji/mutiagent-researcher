@@ -136,6 +136,16 @@ class ProgressTracker:
         # Leave the final table visible
         self._console.print(self._render(final=True))
 
+    def pause(self) -> None:
+        """Pause the live display (e.g. for user input)."""
+        if self._live:
+            self._live.stop()
+
+    def resume(self) -> None:
+        """Resume the live display."""
+        if self._live:
+            self._live.start()
+
     # ── Internal ────────────────────────────────────────────────────────
 
     def _refresh(self) -> None:

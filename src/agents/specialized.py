@@ -229,13 +229,31 @@ class CriticAgent(ToolCallAgent):
             except json.JSONDecodeError:
                 pass
 
-        # Try to find a JSON object anywhere in the response
-        json_match = re.search(r'\{[^{}]*"overall_score"[^{}]*\}', source, re.DOTALL)
-        if json_match:
-            try:
-                return json.loads(json_match.group(0))
-            except json.JSONDecodeError:
-                pass
+        # Try to find a JSON object containing overall_score (handles nested braces)
+        score_idx = source.find('"overall_score"')
+        if score_idx == -1:
+            score_idx = source.find('overall_score')
+        if score_idx >= 0:
+            # Search backward for the opening brace
+            brace_start = source.rfind('{', 0, score_idx)
+            if brace_start >= 0:
+                # Find matching closing brace by counting depth
+                depth = 0
+                brace_end = -1
+                for i in range(brace_start, len(source)):
+                    if source[i] == '{':
+                        depth += 1
+                    elif source[i] == '}':
+                        depth -= 1
+                        if depth == 0:
+                            brace_end = i
+                            break
+                if brace_end >= 0:
+                    candidate = source[brace_start:brace_end + 1]
+                    try:
+                        return json.loads(candidate)
+                    except json.JSONDecodeError:
+                        pass
 
         # Fallback: extract overall_score with a simple regex (quoted or bare key)
         score_match = re.search(r'(?:"overall_score"|overall_score)\s*[:=]\s*(\d+)', source)

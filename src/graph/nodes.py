@@ -342,13 +342,26 @@ async def critic_node(
     request = (
         f"Research topic: {state['topic']}\n\n"
         f"Report to review:\n{draft[:20000]}\n\n"
+        "CRITICAL: You MUST write your full evaluation (including the JSON with scores) "
+        "in your response BEFORE you call Terminate. Do NOT call Terminate until you have "
+        "output the complete review JSON.\n\n"
         "Evaluate this report. Output scores (0-100) for completeness, accuracy, structure, "
-        "depth, credibility, clarity. Identify gaps. Recommend accept or revise. Call Terminate when done."
+        "depth, credibility, clarity. Output as JSON with overall_score. Identify gaps. "
+        "Recommend accept or revise. Call Terminate when done."
     )
 
     await _run_agent_with_progress(critic, request, "critic", progress, timeout)
-    assistant_msgs = [m for m in critic.messages if m.role == "assistant" and m.content]
-    result_text = assistant_msgs[-1].content if assistant_msgs else ""
+    # Collect all assistant messages with content, newest first.
+    # The last message is often the Terminate tool call (empty content),
+    # so search backward for substantive content.
+    all_msgs = [m for m in critic.messages if m.role == "assistant" and m.content]
+    result_text = ""
+    for m in reversed(all_msgs):
+        if len(m.content or "") > 50:
+            result_text = m.content
+            break
+    if not result_text and all_msgs:
+        result_text = all_msgs[-1].content or ""
     review = critic.parse_review(result_text)
 
     overall = review.get("overall_score", 70)
@@ -362,6 +375,9 @@ async def critic_node(
         "current_phase": "reviewed",
         "overall_score": overall,
         "research_round": current_round + 1,
+        # Debug: save raw agent responses to diagnose parse failures
+        "_critic_raw_result": result_text[:2000],
+        "_critic_msg_count": len(all_msgs),
     }
 
 
