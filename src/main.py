@@ -234,15 +234,18 @@ async def run_research(topic: str, agents_config_path: str, research_config_path
                         f"Quality Score: {interrupt_data.get('quality_score', '?')}/100\n"
                         f"Gaps: {interrupt_data.get('gaps', [])}\n\n"
                         f"[bold]Critique Scores:[/bold]\n{interrupt_data.get('scores', 'N/A')}\n\n"
-                        f"[green]完整报告: {interrupt_data.get('report_file', 'N/A')}[/green]\n\n"
-                        f"[dim]输入 approve / revise: <反馈> / abort[/dim]",
+                        f"[green]完整报告: {interrupt_data.get('report_file', 'N/A')}[/green]",
                         style="yellow",
                         title="Human-in-the-Loop",
                     ))
 
-                    # Get user decision
-                    decision = typer.prompt("决策").strip()
-                    console.print(f"[dim]Resuming with: {decision}[/dim]\n")
+                    # Get user decision — use console.input() so typed text is visible
+                    console.print()
+                    decision = console.input(
+                        "[yellow]👉 决策[/yellow] "
+                        "[dim](approve / revise: <意见> / abort)[/dim]: "
+                    ).strip()
+                    console.print(f"\n[dim]已收到: {decision}[/dim]\n")
 
                     # Resume workflow
                     final_state = await workflow.ainvoke(Command(resume=decision), config)
@@ -253,10 +256,16 @@ async def run_research(topic: str, agents_config_path: str, research_config_path
             console.print(f"\n[red]Pipeline error: {e}[/red]")
             raise
         finally:
-            if mcp_manager:
-                await mcp_manager.disconnect_all()
-            if _checkpointer_conn is not None:
-                await _checkpointer_conn.close()
+            try:
+                if mcp_manager:
+                    await mcp_manager.disconnect_all()
+            except RuntimeError:
+                pass  # event loop closing, ignore cleanup noise
+            try:
+                if _checkpointer_conn is not None:
+                    await _checkpointer_conn.close()
+            except RuntimeError:
+                pass
 
     report = final_state.get("final_report", final_state.get("draft_report", "No report generated."))
     quality = final_state.get("quality_score", 0)
