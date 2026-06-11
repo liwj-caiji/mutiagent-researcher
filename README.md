@@ -93,14 +93,14 @@ uv run python -m src.main "Research topic" --config config/research.yaml -v
 
 ## Agent 角色
 
-| Agent | 职责 | 推荐模型 |
-|-------|------|---------|
-| **Planner** | 分解主题、生成大纲 | DeepSeek Flash |
-| **Searcher** | 多源并行搜索（Web/学术/百科） | DeepSeek Flash |
-| **Analyst** | 深度分析、交叉验证 | DeepSeek Pro |
-| **Synthesizer** | 综合归纳、构建逻辑框架 | DeepSeek Pro |
-| **Writer** | 撰写结构化报告 | DeepSeek Flash |
-| **Critic** | 质量评分、缺口识别 | DeepSeek Flash |
+| Agent | 职责 | 推荐模型 | 选型理由 |
+|-------|------|---------|---------|
+| **Planner** | 分解主题、生成大纲 | GPT-4o-mini / Claude Haiku / DeepSeek Flash | 结构化输出为主，轻量模型即可 |
+| **Searcher** | 多源并行搜索（Web/学术/百科） | Claude Sonnet / GPT-4o / DeepSeek Pro | 需要工具调用和信息提取 |
+| **Analyst** | 深度分析、交叉验证 | Claude Opus / o1 / GPT-4o | 强推理需求，交叉验证+矛盾识别 |
+| **Synthesizer** | 综合归纳、构建逻辑框架 | Claude Opus / o1 / GPT-4o | 多源信息整合，需要强归纳能力 |
+| **Writer** | 撰写结构化报告 | Claude Sonnet / GPT-4o / DeepSeek Pro | 长篇写作，Claude 写作质量突出 |
+| **Critic** | 质量评分、缺口识别 | Claude Sonnet / GPT-4o | 结构化评估，中等复杂度 |
 
 ## 搜索工具
 
