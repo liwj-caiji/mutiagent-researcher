@@ -60,10 +60,6 @@ output_formats:
 # Language: "zh" for Chinese, "en" for English
 language: zh
 
-# Long-term memory (ChromaDB)
-use_long_term_memory: false
-memory_persist_dir: ./data/chroma
-
 # MCP (Model Context Protocol) tool servers
 mcp:
   enabled: true  # Set to true to use MCP servers instead of in-process tools
